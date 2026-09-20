@@ -74,6 +74,10 @@ add_library(chorus_core STATIC
     ${CHORUS_ROOT_DIR}/core/src/session/host_session.cpp
     ${CHORUS_ROOT_DIR}/core/src/session/client_session.cpp
     ${CHORUS_ROOT_DIR}/core/src/app/app_controller.cpp
+    ${CHORUS_ROOT_DIR}/core/src/net/crypto_channel.cpp
+    ${CHORUS_ROOT_DIR}/core/src/sync/latency_tuner.cpp
+    ${CHORUS_ROOT_DIR}/core/src/diagnostic/diagnostic_logger.cpp
+    ${CHORUS_ROOT_DIR}/core/src/playback/delayed_host_renderer.cpp
 )
 
 target_include_directories(chorus_core

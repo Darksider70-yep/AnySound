@@ -5,6 +5,17 @@ lib/
 out/
 .cache/
 
+# Android & Gradle
+.gradle/
+**/build/
+**/.cxx/
+*.apk
+*.aab
+*.apk.idsig
+local.properties
+.externalNativeBuild/
+Captures/
+
 # IDE / Editor files
 .vscode/
 .idea/
