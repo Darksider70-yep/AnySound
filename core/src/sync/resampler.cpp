@@ -16,7 +16,7 @@ inline float interpolate_cubic(float sample_0, float sample_1, float sample_2, f
     const float coeff_1 = sample_0 - (2.5F * sample_1) + (2.0F * sample_2) - (0.5F * sample_3);
     const float coeff_2 = (-0.5F * sample_0) + (0.5F * sample_2);
     const float coeff_3 = sample_1;
-    return ((((coeff_0 * fraction_t) + coeff_1) * fraction_t) + coeff_2) * fraction_t + coeff_3;
+    return (((((coeff_0 * fraction_t) + coeff_1) * fraction_t) + coeff_2) * fraction_t) + coeff_3;
 }
 
 float fetch_channel_sample(int64_t sample_idx,
@@ -28,10 +28,10 @@ float fetch_channel_sample(int64_t sample_idx,
     if (sample_idx < 0) {
         if (has_prev) {
             if (sample_idx == -1) {
-                return prev_samples[2 + channel];
+                return (channel == 0) ? prev_samples[2] : prev_samples[3];
             }
             if (sample_idx == -2) {
-                return prev_samples[channel];
+                return (channel == 0) ? prev_samples[0] : prev_samples[1];
             }
         }
         return input[channel];
