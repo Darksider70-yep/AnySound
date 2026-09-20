@@ -1,10 +1,7 @@
 #pragma once
 
-#include <cstddef>
 #include <cstdint>
-#include <memory>
 #include <span>
-#include <vector>
 
 struct OpusEncoder;
 struct OpusDecoder;
@@ -18,6 +15,7 @@ inline constexpr int kFrameDurationMs = 20;
 inline constexpr int kSamplesPerFramePerChannel = (kSampleRate * kFrameDurationMs) / 1000;  // 960
 inline constexpr int kFloatsPerFrame = kSamplesPerFramePerChannel * kChannels;              // 1920
 inline constexpr int kDefaultBitrate = 96000;                                               // 96 kbps
+inline constexpr int kDefaultExpectedLossPct = 5;
 inline constexpr int kMaxOpusPayloadBytes = 1200;
 
 /// @brief Wrapper for Opus audio encoder (48kHz stereo, 20ms frames).
@@ -32,7 +30,8 @@ public:
     OpusEncoderWrap& operator=(OpusEncoderWrap&& other) noexcept;
 
     /// @brief Initializes the encoder with specified bitrate and in-band FEC settings.
-    [[nodiscard]] bool init(int bitrate = kDefaultBitrate, int expected_loss_pct = 5);
+    [[nodiscard]] bool init(int bitrate = kDefaultBitrate,
+                            int expected_loss_pct = kDefaultExpectedLossPct);
 
     /// @brief Encodes 960 stereo float samples (1920 floats) to an Opus payload.
     /// @param pcm_in Interleaved float samples (must be exactly 1920 floats).

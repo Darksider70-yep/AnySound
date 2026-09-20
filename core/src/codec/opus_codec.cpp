@@ -59,7 +59,7 @@ int OpusEncoderWrap::encode(std::span<const float> pcm_in, std::span<uint8_t> ou
         return -1;
     }
 
-    const opus_int32 bytes = opus_encode_float(
+    const auto bytes = opus_encode_float(
         encoder_,
         pcm_in.data(),
         kSamplesPerFramePerChannel,
@@ -116,8 +116,8 @@ int OpusDecoderWrap::decode(std::span<const uint8_t> payload,
         return -1;
     }
 
-    const unsigned char* data = payload.empty() ? nullptr : payload.data();
-    const opus_int32 len = static_cast<opus_int32>(payload.size());
+    const auto* data = payload.empty() ? nullptr : payload.data();
+    const auto len = static_cast<opus_int32>(payload.size());
 
     const int samples_decoded = opus_decode_float(
         decoder_,

@@ -22,7 +22,7 @@
 #endif
 
 #include <algorithm>
-#include <iostream>
+#include <atomic>
 
 namespace chorus {
 
@@ -54,7 +54,7 @@ void capture_data_callback(ma_device* pDevice, void* pOutput, const void* pInput
     }
 
     const auto* samples = static_cast<const float*>(pInput);
-    const size_t total_floats = static_cast<size_t>(frameCount) * kChannels;
+    const size_t total_floats = static_cast<size_t>(frameCount) * static_cast<size_t>(kChannels);
 
     state->ring->write(std::span<const float>(samples, total_floats));
     state->frames_captured.fetch_add(frameCount, std::memory_order_relaxed);
@@ -67,6 +67,9 @@ AudioCaptureDevice::AudioCaptureDevice() : impl_(std::make_unique<Impl>()) {}
 AudioCaptureDevice::~AudioCaptureDevice() {
     stop();
 }
+
+AudioCaptureDevice::AudioCaptureDevice(AudioCaptureDevice&& other) noexcept = default;
+AudioCaptureDevice& AudioCaptureDevice::operator=(AudioCaptureDevice&& other) noexcept = default;
 
 bool AudioCaptureDevice::start_loopback(SpscRing<float>* ring) {
     if (impl_->state.running.load()) {
@@ -169,7 +172,7 @@ void playback_data_callback(ma_device* pDevice, void* pOutput, const void* pInpu
     }
 
     auto* out_samples = static_cast<float*>(pOutput);
-    const size_t needed_floats = static_cast<size_t>(frameCount) * kChannels;
+    const size_t needed_floats = static_cast<size_t>(frameCount) * static_cast<size_t>(kChannels);
 
     if (state->ring == nullptr) {
         std::fill(out_samples, out_samples + needed_floats, 0.0f);
@@ -192,6 +195,9 @@ AudioPlaybackDevice::AudioPlaybackDevice() : impl_(std::make_unique<Impl>()) {}
 AudioPlaybackDevice::~AudioPlaybackDevice() {
     stop();
 }
+
+AudioPlaybackDevice::AudioPlaybackDevice(AudioPlaybackDevice&& other) noexcept = default;
+AudioPlaybackDevice& AudioPlaybackDevice::operator=(AudioPlaybackDevice&& other) noexcept = default;
 
 bool AudioPlaybackDevice::start_playback(SpscRing<float>* ring) {
     if (impl_->state.running.load()) {

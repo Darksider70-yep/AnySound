@@ -5,47 +5,51 @@
 #include <numbers>
 #include <vector>
 
+namespace {
+constexpr float kSineFreqHz = 440.0F;
+constexpr size_t kWarmupFrameCount = 5;
+constexpr float kMinEnergyRatio = 0.70F;
+constexpr float kMaxEnergyRatio = 1.30F;
+}  // namespace
+
 TEST_CASE("Opus codec initialization and round-trip encode-decode", "[codec][opus]") {
     chorus::OpusEncoderWrap encoder;
-    REQUIRE(encoder.init(96000, 5));
+    REQUIRE(encoder.init(chorus::kDefaultBitrate, chorus::kDefaultExpectedLossPct));
 
     chorus::OpusDecoderWrap decoder;
     REQUIRE(decoder.init());
 
-    // Generate a 440 Hz test sine wave for 5 frames (100ms) to allow Opus filter warmup
-    constexpr size_t kNumFrames = 5;
-    std::vector<float> pcm_out(chorus::kFloatsPerFrame);
+    std::vector<float> pcm_out(static_cast<size_t>(chorus::kFloatsPerFrame));
     std::vector<uint8_t> payload(chorus::kMaxOpusPayloadBytes);
 
-    float total_energy_in = 0.0f;
-    float total_energy_out = 0.0f;
+    float total_energy_in = 0.0F;
+    float total_energy_out = 0.0F;
 
-    for (size_t f = 0; f < kNumFrames; ++f) {
-        std::vector<float> pcm_in(chorus::kFloatsPerFrame);
-        for (size_t i = 0; i < chorus::kSamplesPerFramePerChannel; ++i) {
-            const size_t global_sample = f * chorus::kSamplesPerFramePerChannel + i;
-            const float sample = std::sin(2.0f * std::numbers::pi_v<float> * 440.0f * static_cast<float>(global_sample) / static_cast<float>(chorus::kSampleRate));
-            pcm_in[i * 2] = sample;      // Left
-            pcm_in[i * 2 + 1] = sample;  // Right
-            total_energy_in += sample * sample;
+    for (size_t frame_idx = 0; frame_idx < kWarmupFrameCount; ++frame_idx) {
+        std::vector<float> pcm_in(static_cast<size_t>(chorus::kFloatsPerFrame));
+        for (size_t i = 0; i < static_cast<size_t>(chorus::kSamplesPerFramePerChannel); ++i) {
+            const size_t global_sample = (frame_idx * static_cast<size_t>(chorus::kSamplesPerFramePerChannel)) + i;
+            const auto sample_val = static_cast<float>(std::sin((2.0 * std::numbers::pi * static_cast<double>(kSineFreqHz) * static_cast<double>(global_sample)) / static_cast<double>(chorus::kSampleRate)));
+            pcm_in[i * 2] = sample_val;
+            pcm_in[(i * 2) + 1] = sample_val;
+            total_energy_in += (sample_val * sample_val);
         }
 
-        int bytes_encoded = encoder.encode(pcm_in, payload);
+        const int bytes_encoded = encoder.encode(pcm_in, payload);
         REQUIRE(bytes_encoded > 0);
         REQUIRE(bytes_encoded <= static_cast<int>(chorus::kMaxOpusPayloadBytes));
 
-        int samples_decoded = decoder.decode(std::span<const uint8_t>(payload.data(), static_cast<size_t>(bytes_encoded)), pcm_out);
+        const int samples_decoded = decoder.decode(std::span<const uint8_t>(payload.data(), static_cast<size_t>(bytes_encoded)), pcm_out);
         REQUIRE(samples_decoded == chorus::kSamplesPerFramePerChannel);
 
-        for (size_t i = 0; i < chorus::kFloatsPerFrame; i += 2) {
-            total_energy_out += pcm_out[i] * pcm_out[i];
+        for (size_t i = 0; i < static_cast<size_t>(chorus::kFloatsPerFrame); i += 2) {
+            total_energy_out += (pcm_out[i] * pcm_out[i]);
         }
     }
 
-    // Verify energy preservation within 15% after codec warmup
     const float energy_ratio = total_energy_out / total_energy_in;
-    REQUIRE(energy_ratio > 0.70f);
-    REQUIRE(energy_ratio < 1.30f);
+    REQUIRE(energy_ratio > kMinEnergyRatio);
+    REQUIRE(energy_ratio < kMaxEnergyRatio);
 }
 
 TEST_CASE("Opus Packet Loss Concealment (PLC)", "[codec][opus]") {
@@ -55,17 +59,17 @@ TEST_CASE("Opus Packet Loss Concealment (PLC)", "[codec][opus]") {
     chorus::OpusDecoderWrap decoder;
     REQUIRE(decoder.init());
 
-    std::vector<float> pcm_in(chorus::kFloatsPerFrame, 0.5f);
+    const std::vector<float> pcm_in(static_cast<size_t>(chorus::kFloatsPerFrame), 0.5F);
     std::vector<uint8_t> payload(chorus::kMaxOpusPayloadBytes);
-    int bytes = encoder.encode(pcm_in, payload);
+    const int bytes = encoder.encode(pcm_in, payload);
     REQUIRE(bytes > 0);
 
     // First normal decode
-    std::vector<float> pcm_out(chorus::kFloatsPerFrame);
+    std::vector<float> pcm_out(static_cast<size_t>(chorus::kFloatsPerFrame));
     REQUIRE(decoder.decode(std::span<const uint8_t>(payload.data(), static_cast<size_t>(bytes)), pcm_out) == chorus::kSamplesPerFramePerChannel);
 
     // Conceal lost packet with empty payload (PLC)
-    std::vector<float> plc_out(chorus::kFloatsPerFrame);
-    int plc_samples = decoder.decode(std::span<const uint8_t>{}, plc_out);
+    std::vector<float> plc_out(static_cast<size_t>(chorus::kFloatsPerFrame));
+    const int plc_samples = decoder.decode(std::span<const uint8_t>{}, plc_out);
     REQUIRE(plc_samples == chorus::kSamplesPerFramePerChannel);
 }

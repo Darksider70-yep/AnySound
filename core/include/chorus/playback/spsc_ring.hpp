@@ -133,12 +133,14 @@ public:
     }
 
 private:
+    static constexpr size_t kCacheLineBytes = 64;
+
     const size_t capacity_;
     std::vector<T> buffer_;
 
     // Align to separate cache lines (64 bytes) to prevent false sharing
-    alignas(64) std::atomic<size_t> head_;
-    alignas(64) std::atomic<size_t> tail_;
+    alignas(kCacheLineBytes) std::atomic<size_t> head_;
+    alignas(kCacheLineBytes) std::atomic<size_t> tail_;
 };
 
 }  // namespace chorus

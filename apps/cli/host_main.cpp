@@ -15,49 +15,110 @@
 #include <vector>
 
 namespace {
-std::atomic<bool> g_stop{false};
+
+constexpr size_t kAudioHeaderOffsetMagic = 0;
+constexpr size_t kAudioHeaderOffsetVersion = 2;
+constexpr size_t kAudioHeaderOffsetType = 3;
+constexpr size_t kAudioHeaderOffsetSessionId = 4;
+constexpr size_t kAudioHeaderOffsetSeq = 8;
+constexpr size_t kAudioHeaderOffsetPlayAtUs = 12;
+constexpr size_t kAudioHeaderOffsetFlags = 20;
+constexpr size_t kAudioHeaderOffsetPayloadLen = 21;
+constexpr size_t kAudioHeaderSize = 23;
+
+constexpr double kDefaultToneFreqHz = 440.0;
+constexpr double kTwoPi = 2.0 * std::numbers::pi;
+constexpr float kToneAmplitude = 0.3F;
+constexpr uint32_t kDefaultSessionId = 1;
+
+std::atomic<bool> g_stop_requested{false};
 
 void signal_handler(int) {
-    g_stop.store(true);
+    g_stop_requested.store(true);
 }
+
+struct HostConfig {
+    std::string target_ip{"127.0.0.1"};
+    uint16_t target_port{chorus::kDefaultUdpDataPort};
+    bool test_tone{false};
+    int duration_sec{0};
+    bool show_help{false};
+};
+
+HostConfig parse_host_args(int argc, char* argv[]) {
+    HostConfig config;
+    for (int i = 1; i < argc; ++i) {
+        const std::string arg = argv[i];
+        if (arg == "--test-tone") {
+            config.test_tone = true;
+        } else if (arg == "--duration" && (i + 1 < argc)) {
+            config.duration_sec = std::stoi(argv[++i]);
+        } else if (arg == "--help" || arg == "-h") {
+            config.show_help = true;
+            return config;
+        } else if (i == 1 && arg[0] != '-') {
+            config.target_ip = arg;
+        } else if (i == 2 && arg[0] != '-') {
+            config.target_port = static_cast<uint16_t>(std::stoi(arg));
+        }
+    }
+    return config;
+}
+
+void generate_sine_samples(std::span<float> frame_pcm, double& tone_phase) {
+    const double phase_increment = (kTwoPi * kDefaultToneFreqHz) / static_cast<double>(chorus::kSampleRate);
+    for (size_t i = 0; i < static_cast<size_t>(chorus::kSamplesPerFramePerChannel); ++i) {
+        const auto sample_val = static_cast<float>(static_cast<double>(kToneAmplitude) * std::sin(tone_phase));
+        tone_phase += phase_increment;
+        if (tone_phase >= kTwoPi) {
+            tone_phase -= kTwoPi;
+        }
+        frame_pcm[i * 2] = sample_val;
+        frame_pcm[(i * 2) + 1] = sample_val;
+    }
+}
+
+size_t build_audio_packet(std::span<uint8_t> packet_buf,
+                          std::span<const uint8_t> opus_payload,
+                          uint32_t session_id,
+                          uint32_t seq) {
+    chorus::endian::write_u16_be(packet_buf.data() + kAudioHeaderOffsetMagic, chorus::kPacketMagic);
+    packet_buf[kAudioHeaderOffsetVersion] = chorus::kProtocolVersion;
+    packet_buf[kAudioHeaderOffsetType] = static_cast<uint8_t>(chorus::PacketType::Audio);
+    chorus::endian::write_u32_be(packet_buf.data() + kAudioHeaderOffsetSessionId, session_id);
+    chorus::endian::write_u32_be(packet_buf.data() + kAudioHeaderOffsetSeq, seq);
+    chorus::endian::write_u64_be(packet_buf.data() + kAudioHeaderOffsetPlayAtUs, 0);
+    packet_buf[kAudioHeaderOffsetFlags] = 0;
+    chorus::endian::write_u16_be(packet_buf.data() + kAudioHeaderOffsetPayloadLen,
+                                 static_cast<uint16_t>(opus_payload.size()));
+
+    std::copy(opus_payload.begin(), opus_payload.end(), packet_buf.begin() + static_cast<ptrdiff_t>(kAudioHeaderSize));
+    return kAudioHeaderSize + opus_payload.size();
+}
+
 }  // namespace
 
 int main(int argc, char* argv[]) {
     std::signal(SIGINT, signal_handler);
     std::signal(SIGTERM, signal_handler);
 
-    std::string target_ip = "127.0.0.1";
-    uint16_t target_port = chorus::kDefaultUdpDataPort;
-    bool test_tone = false;
-    int duration_sec = 0;
-
-    for (int i = 1; i < argc; ++i) {
-        std::string arg = argv[i];
-        if (arg == "--test-tone") {
-            test_tone = true;
-        } else if (arg == "--duration" && i + 1 < argc) {
-            duration_sec = std::stoi(argv[++i]);
-        } else if (arg == "--help" || arg == "-h") {
-            std::cout << "Usage: chorus_host [client-ip] [client-port] [--test-tone] [--duration <sec>]\n";
-            return 0;
-        } else if (i == 1 && arg[0] != '-') {
-            target_ip = arg;
-        } else if (i == 2 && arg[0] != '-') {
-            target_port = static_cast<uint16_t>(std::stoi(arg));
-        }
+    const HostConfig config = parse_host_args(argc, argv);
+    if (config.show_help) {
+        std::cout << "Usage: chorus_host [client-ip] [client-port] [--test-tone] [--duration <sec>]\n";
+        return 0;
     }
 
     std::cout << "========================================\n";
     std::cout << "Chorus Host Audio Streamer (Phase 1)\n";
-    std::cout << "Target: " << target_ip << ":" << target_port << "\n";
-    std::cout << "Mode: " << (test_tone ? "440Hz Test Sine Generator" : "WASAPI System Loopback Capture") << "\n";
-    if (duration_sec > 0) {
-        std::cout << "Duration: " << duration_sec << " seconds\n";
+    std::cout << "Target: " << config.target_ip << ":" << config.target_port << "\n";
+    std::cout << "Mode: " << (config.test_tone ? "440Hz Test Sine Generator" : "WASAPI System Loopback Capture") << "\n";
+    if (config.duration_sec > 0) {
+        std::cout << "Duration: " << config.duration_sec << " seconds\n";
     }
     std::cout << "========================================\n" << std::flush;
 
     chorus::OpusEncoderWrap encoder;
-    if (!encoder.init(chorus::kDefaultBitrate, 5)) {
+    if (!encoder.init(chorus::kDefaultBitrate, chorus::kDefaultExpectedLossPct)) {
         std::cerr << "Failed to initialize Opus encoder.\n" << std::flush;
         return 1;
     }
@@ -68,60 +129,49 @@ int main(int argc, char* argv[]) {
         return 1;
     }
 
-    // Allocate 1 second capacity SPSC ring buffer for PCM samples
-    chorus::SpscRing<float> capture_ring(chorus::kSampleRate * chorus::kChannels);
+    const size_t ring_capacity = static_cast<size_t>(chorus::kSampleRate) * static_cast<size_t>(chorus::kChannels);
+    chorus::SpscRing<float> capture_ring(ring_capacity);
     chorus::AudioCaptureDevice capture_device;
 
-    if (!test_tone) {
+    bool active_test_tone = config.test_tone;
+    if (!active_test_tone) {
         if (!capture_device.start_loopback(&capture_ring)) {
             std::cerr << "Failed to start audio loopback capture. Falling back to test tone generator.\n" << std::flush;
-            test_tone = true;
+            active_test_tone = true;
         } else {
             std::cout << "WASAPI loopback audio capture active.\n" << std::flush;
         }
     }
 
-    std::vector<float> frame_pcm(chorus::kFloatsPerFrame);
+    std::vector<float> frame_pcm(static_cast<size_t>(chorus::kFloatsPerFrame));
     std::vector<uint8_t> opus_payload(chorus::kMaxOpusPayloadBytes);
     std::vector<uint8_t> packet_buf(chorus::kMaxUdpPayloadSize);
 
-    const chorus::Endpoint dest{target_ip, target_port};
+    const chorus::Endpoint destination{.address = config.target_ip, .port = config.target_port};
     uint32_t seq = 0;
-    uint32_t session_id = 1;
     uint64_t total_bytes_sent = 0;
 
-    auto start_time = std::chrono::steady_clock::now();
+    const auto start_time = std::chrono::steady_clock::now();
     auto last_stats_time = start_time;
     uint32_t frames_in_window = 0;
     double tone_phase = 0.0;
 
-    while (!g_stop.load()) {
-        if (duration_sec > 0) {
-            auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(std::chrono::steady_clock::now() - start_time).count();
-            if (elapsed >= duration_sec) {
+    while (!g_stop_requested.load()) {
+        if (config.duration_sec > 0) {
+            const auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(std::chrono::steady_clock::now() - start_time).count();
+            if (elapsed >= config.duration_sec) {
                 break;
             }
         }
-        bool frame_ready = false;
 
-        if (test_tone) {
-            // Generate 20ms of 440 Hz stereo sine tone
-            constexpr double kPhaseIncrement = 2.0 * std::numbers::pi * 440.0 / static_cast<double>(chorus::kSampleRate);
-            for (size_t i = 0; i < chorus::kSamplesPerFramePerChannel; ++i) {
-                const float s = static_cast<float>(0.3 * std::sin(tone_phase));
-                tone_phase += kPhaseIncrement;
-                if (tone_phase >= 2.0 * std::numbers::pi) {
-                    tone_phase -= 2.0 * std::numbers::pi;
-                }
-                frame_pcm[i * 2] = s;
-                frame_pcm[i * 2 + 1] = s;
-            }
+        bool frame_ready = false;
+        if (active_test_tone) {
+            generate_sine_samples(frame_pcm, tone_phase);
             std::this_thread::sleep_for(std::chrono::milliseconds(chorus::kFrameDurationMs));
             frame_ready = true;
         } else {
-            // Read exactly one 20ms frame (1920 floats) from the capture ring
             if (capture_ring.size() >= static_cast<size_t>(chorus::kFloatsPerFrame)) {
-                size_t read_floats = capture_ring.read(frame_pcm);
+                const size_t read_floats = capture_ring.read(frame_pcm);
                 if (read_floats == static_cast<size_t>(chorus::kFloatsPerFrame)) {
                     frame_ready = true;
                 }
@@ -131,46 +181,25 @@ int main(int argc, char* argv[]) {
         }
 
         if (frame_ready) {
-            int payload_bytes = encoder.encode(frame_pcm, opus_payload);
+            const int payload_bytes = encoder.encode(frame_pcm, opus_payload);
             if (payload_bytes > 0) {
-                // Construct UDP packet (Common Header 8 bytes + Audio Payload)
-                // [0-1]: Magic (0x4348)
-                // [2]: Version (1)
-                // [3]: Type (1 = Audio)
-                // [4-7]: SessionId
-                // [8-11]: Seq
-                // [12-19]: PlayAtHostUs (0 for phase 1)
-                // [20]: Flags (0)
-                // [21-22]: PayloadLen
-                // [23...]: Opus payload
-                chorus::endian::write_u16_be(packet_buf.data(), chorus::kPacketMagic);
-                packet_buf[2] = chorus::kProtocolVersion;
-                packet_buf[3] = static_cast<uint8_t>(chorus::PacketType::Audio);
-                chorus::endian::write_u32_be(packet_buf.data() + 4, session_id);
-                chorus::endian::write_u32_be(packet_buf.data() + 8, seq++);
-                chorus::endian::write_u64_be(packet_buf.data() + 12, 0);  // playAtHostUs
-                packet_buf[20] = 0;                                       // flags
-                chorus::endian::write_u16_be(packet_buf.data() + 21, static_cast<uint16_t>(payload_bytes));
-
-                std::copy_n(opus_payload.data(), payload_bytes, packet_buf.data() + 23);
-
-                const size_t total_packet_size = 23 + static_cast<size_t>(payload_bytes);
-                if (socket.send_to(std::span<const uint8_t>(packet_buf.data(), total_packet_size), dest)) {
-                    total_bytes_sent += total_packet_size;
+                const std::span<const uint8_t> payload_span(opus_payload.data(), static_cast<size_t>(payload_bytes));
+                const size_t packet_len = build_audio_packet(packet_buf, payload_span, kDefaultSessionId, seq++);
+                if (socket.send_to(std::span<const uint8_t>(packet_buf.data(), packet_len), destination)) {
+                    total_bytes_sent += packet_len;
                     frames_in_window++;
                 }
             }
         }
 
-        // Print stats every 2 seconds
-        auto now = std::chrono::steady_clock::now();
+        const auto now = std::chrono::steady_clock::now();
         if (now - last_stats_time >= std::chrono::seconds(2)) {
             const double elapsed_s = std::chrono::duration<double>(now - last_stats_time).count();
             const double fps = static_cast<double>(frames_in_window) / elapsed_s;
             const double kbps = (static_cast<double>(total_bytes_sent * 8) / 1000.0) / elapsed_s;
 
             std::cout << "[Host] Sent " << seq << " frames | Rate: " << fps << " fps | Bandwidth: "
-                      << kbps << " kbps\n";
+                      << kbps << " kbps\n" << std::flush;
 
             frames_in_window = 0;
             total_bytes_sent = 0;
@@ -178,7 +207,7 @@ int main(int argc, char* argv[]) {
         }
     }
 
-    std::cout << "\nStopping Chorus Host...\n";
+    std::cout << "\nStopping Chorus Host...\n" << std::flush;
     capture_device.stop();
     return 0;
 }

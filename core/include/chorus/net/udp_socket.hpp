@@ -5,7 +5,6 @@
 #include <span>
 #include <string>
 #include <string_view>
-#include <vector>
 
 namespace chorus {
 
@@ -48,7 +47,7 @@ public:
     UdpSocket& operator=(UdpSocket&& other) noexcept;
 
     /// @brief Binds the socket to a local port and optional interface address.
-    [[nodiscard]] bool bind(uint16_t port, std::string_view ip = "0.0.0.0");
+    [[nodiscard]] bool bind(uint16_t port, std::string_view interface_ip = "0.0.0.0");
 
     /// @brief Sets receive timeout in milliseconds.
     [[nodiscard]] bool set_recv_timeout_ms(int timeout_ms);

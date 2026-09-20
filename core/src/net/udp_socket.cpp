@@ -1,7 +1,6 @@
 #include <chorus/net/udp_socket.hpp>
 
-#include <cstring>
-#include <iostream>
+#include <array>
 
 #ifdef _WIN32
     #ifndef WIN32_LEAN_AND_MEAN
@@ -27,40 +26,49 @@ namespace chorus {
 
 namespace endian {
 
+namespace {
+constexpr uint32_t kShift24 = 24;
+constexpr uint32_t kShift16 = 16;
+constexpr uint32_t kShift8 = 8;
+constexpr uint32_t kByteMask = 0xFF;
+constexpr int kBitsPerByte = 8;
+constexpr int kU64ByteCount = 8;
+}  // namespace
+
 void write_u16_be(uint8_t* dst, uint16_t val) noexcept {
-    dst[0] = static_cast<uint8_t>((val >> 8) & 0xFF);
-    dst[1] = static_cast<uint8_t>(val & 0xFF);
+    dst[0] = static_cast<uint8_t>((val >> kShift8) & kByteMask);
+    dst[1] = static_cast<uint8_t>(val & kByteMask);
 }
 
 void write_u32_be(uint8_t* dst, uint32_t val) noexcept {
-    dst[0] = static_cast<uint8_t>((val >> 24) & 0xFF);
-    dst[1] = static_cast<uint8_t>((val >> 16) & 0xFF);
-    dst[2] = static_cast<uint8_t>((val >> 8) & 0xFF);
-    dst[3] = static_cast<uint8_t>(val & 0xFF);
+    dst[0] = static_cast<uint8_t>((val >> kShift24) & kByteMask);
+    dst[1] = static_cast<uint8_t>((val >> kShift16) & kByteMask);
+    dst[2] = static_cast<uint8_t>((val >> kShift8) & kByteMask);
+    dst[3] = static_cast<uint8_t>(val & kByteMask);
 }
 
 void write_u64_be(uint8_t* dst, uint64_t val) noexcept {
-    for (int i = 7; i >= 0; --i) {
-        dst[7 - i] = static_cast<uint8_t>((val >> (i * 8)) & 0xFF);
+    for (int i = kU64ByteCount - 1; i >= 0; --i) {
+        dst[(kU64ByteCount - 1) - i] = static_cast<uint8_t>((val >> (i * kBitsPerByte)) & kByteMask);
     }
 }
 
 uint16_t read_u16_be(const uint8_t* src) noexcept {
-    return static_cast<uint16_t>((static_cast<uint16_t>(src[0]) << 8) |
+    return static_cast<uint16_t>((static_cast<uint16_t>(src[0]) << kShift8) |
                                  static_cast<uint16_t>(src[1]));
 }
 
 uint32_t read_u32_be(const uint8_t* src) noexcept {
-    return (static_cast<uint32_t>(src[0]) << 24) |
-           (static_cast<uint32_t>(src[1]) << 16) |
-           (static_cast<uint32_t>(src[2]) << 8) |
+    return (static_cast<uint32_t>(src[0]) << kShift24) |
+           (static_cast<uint32_t>(src[1]) << kShift16) |
+           (static_cast<uint32_t>(src[2]) << kShift8) |
            static_cast<uint32_t>(src[3]);
 }
 
 uint64_t read_u64_be(const uint8_t* src) noexcept {
     uint64_t val = 0;
-    for (int i = 0; i < 8; ++i) {
-        val = (val << 8) | static_cast<uint64_t>(src[i]);
+    for (int i = 0; i < kU64ByteCount; ++i) {
+        val = (val << kBitsPerByte) | static_cast<uint64_t>(src[i]);
     }
     return val;
 }
@@ -77,6 +85,10 @@ namespace {
         ~WinsockInit() {
             WSACleanup();
         }
+        WinsockInit(const WinsockInit&) = delete;
+        WinsockInit& operator=(const WinsockInit&) = delete;
+        WinsockInit(WinsockInit&&) = delete;
+        WinsockInit& operator=(WinsockInit&&) = delete;
     };
 
     void ensure_winsock_initialized() {
@@ -90,9 +102,9 @@ namespace {
 
 UdpSocket::UdpSocket() {
     ensure_winsock_initialized();
-    sock_t s = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
-    if (s != kInvalidSock) {
-        socket_handle_ = static_cast<intptr_t>(s);
+    const sock_t initial_socket = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
+    if (initial_socket != kInvalidSock) {
+        socket_handle_ = static_cast<intptr_t>(initial_socket);
     }
 }
 
@@ -119,17 +131,17 @@ bool UdpSocket::is_valid() const noexcept {
 
 void UdpSocket::close() noexcept {
     if (is_valid()) {
-        const sock_t s = static_cast<sock_t>(socket_handle_);
+        const auto socket_fd = static_cast<sock_t>(socket_handle_);
 #ifdef _WIN32
-        closesocket(s);
+        closesocket(socket_fd);
 #else
-        ::close(s);
+        ::close(socket_fd);
 #endif
         socket_handle_ = -1;
     }
 }
 
-bool UdpSocket::bind(uint16_t port, std::string_view ip) {
+bool UdpSocket::bind(uint16_t port, std::string_view interface_ip) {
     if (!is_valid()) {
         return false;
     }
@@ -137,35 +149,36 @@ bool UdpSocket::bind(uint16_t port, std::string_view ip) {
     sockaddr_in addr{};
     addr.sin_family = AF_INET;
     addr.sin_port = htons(port);
-    if (ip == "0.0.0.0" || ip.empty()) {
+    if (interface_ip == "0.0.0.0" || interface_ip.empty()) {
         addr.sin_addr.s_addr = INADDR_ANY;
     } else {
-        std::string ip_str(ip);
+        std::string ip_str(interface_ip);
         if (inet_pton(AF_INET, ip_str.c_str(), &addr.sin_addr) <= 0) {
             return false;
         }
     }
 
-    const sock_t s = static_cast<sock_t>(socket_handle_);
-    const int rc = ::bind(s, reinterpret_cast<const sockaddr*>(&addr), sizeof(addr));
-    return (rc != kSocketError);
+    const auto socket_fd = static_cast<sock_t>(socket_handle_);
+    const int result_code = ::bind(socket_fd, reinterpret_cast<const sockaddr*>(&addr), sizeof(addr));
+    return (result_code != kSocketError);
 }
 
 bool UdpSocket::set_recv_timeout_ms(int timeout_ms) {
     if (!is_valid()) {
         return false;
     }
-    const sock_t s = static_cast<sock_t>(socket_handle_);
+    const auto socket_fd = static_cast<sock_t>(socket_handle_);
 #ifdef _WIN32
-    DWORD tv = static_cast<DWORD>(timeout_ms);
-    const int rc = setsockopt(s, SOL_SOCKET, SO_RCVTIMEO, reinterpret_cast<const char*>(&tv), sizeof(tv));
+    const auto time_val = static_cast<DWORD>(timeout_ms);
+    const int result_code = setsockopt(socket_fd, SOL_SOCKET, SO_RCVTIMEO,
+                                      reinterpret_cast<const char*>(&time_val), sizeof(time_val));
 #else
-    struct timeval tv{};
-    tv.tv_sec = timeout_ms / 1000;
-    tv.tv_usec = (timeout_ms % 1000) * 1000;
-    const int rc = setsockopt(s, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
+    struct timeval time_val{};
+    time_val.tv_sec = timeout_ms / 1000;
+    time_val.tv_usec = (timeout_ms % 1000) * 1000;
+    const int result_code = setsockopt(socket_fd, SOL_SOCKET, SO_RCVTIMEO, &time_val, sizeof(time_val));
 #endif
-    return (rc != kSocketError);
+    return (result_code != kSocketError);
 }
 
 bool UdpSocket::send_to(std::span<const uint8_t> data, const Endpoint& dest) {
@@ -180,9 +193,9 @@ bool UdpSocket::send_to(std::span<const uint8_t> data, const Endpoint& dest) {
         return false;
     }
 
-    const sock_t s = static_cast<sock_t>(socket_handle_);
+    const auto socket_fd = static_cast<sock_t>(socket_handle_);
     const int sent = sendto(
-        s,
+        socket_fd,
         reinterpret_cast<const char*>(data.data()),
         static_cast<int>(data.size()),
         0,
@@ -205,9 +218,9 @@ int UdpSocket::receive_from(std::span<uint8_t> buffer, Endpoint& sender_out) {
     socklen_t addr_len = sizeof(addr);
 #endif
 
-    const sock_t s = static_cast<sock_t>(socket_handle_);
+    const auto socket_fd = static_cast<sock_t>(socket_handle_);
     const int received = recvfrom(
-        s,
+        socket_fd,
         reinterpret_cast<char*>(buffer.data()),
         static_cast<int>(buffer.size()),
         0,
@@ -229,9 +242,9 @@ int UdpSocket::receive_from(std::span<uint8_t> buffer, Endpoint& sender_out) {
         return -1;
     }
 
-    char ip_buf[INET_ADDRSTRLEN]{};
-    inet_ntop(AF_INET, &addr.sin_addr, ip_buf, sizeof(ip_buf));
-    sender_out.address = ip_buf;
+    std::array<char, INET_ADDRSTRLEN> ip_buf{};
+    inet_ntop(AF_INET, &addr.sin_addr, ip_buf.data(), sizeof(ip_buf));
+    sender_out.address = ip_buf.data();
     sender_out.port = ntohs(addr.sin_port);
 
     return received;
@@ -247,8 +260,8 @@ uint16_t UdpSocket::local_port() const {
 #else
     socklen_t addr_len = sizeof(addr);
 #endif
-    const sock_t s = static_cast<sock_t>(socket_handle_);
-    if (getsockname(s, reinterpret_cast<sockaddr*>(&addr), &addr_len) == 0) {
+    const auto socket_fd = static_cast<sock_t>(socket_handle_);
+    if (getsockname(socket_fd, reinterpret_cast<sockaddr*>(&addr), &addr_len) == 0) {
         return ntohs(addr.sin_port);
     }
     return 0;

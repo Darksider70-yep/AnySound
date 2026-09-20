@@ -3,10 +3,8 @@
 #include <chorus/codec/opus_codec.hpp>
 #include <chorus/playback/spsc_ring.hpp>
 
-#include <atomic>
 #include <cstdint>
 #include <memory>
-#include <string>
 
 namespace chorus {
 
@@ -19,6 +17,8 @@ public:
 
     AudioCaptureDevice(const AudioCaptureDevice&) = delete;
     AudioCaptureDevice& operator=(const AudioCaptureDevice&) = delete;
+    AudioCaptureDevice(AudioCaptureDevice&& other) noexcept;
+    AudioCaptureDevice& operator=(AudioCaptureDevice&& other) noexcept;
 
     /// @brief Starts system loopback audio capture.
     /// @param ring Target lock-free ring buffer where captured floats are stored.
@@ -47,6 +47,8 @@ public:
 
     AudioPlaybackDevice(const AudioPlaybackDevice&) = delete;
     AudioPlaybackDevice& operator=(const AudioPlaybackDevice&) = delete;
+    AudioPlaybackDevice(AudioPlaybackDevice&& other) noexcept;
+    AudioPlaybackDevice& operator=(AudioPlaybackDevice&& other) noexcept;
 
     /// @brief Starts audio playback.
     /// @param ring Source lock-free ring buffer providing audio floats.
