@@ -1,11 +1,9 @@
-// NOLINTBEGIN
 #include <catch2/catch_test_macros.hpp>
 #include <chorus/codec/opus_codec.hpp>
 #include <chorus/sync/drift_controller.hpp>
 #include <chorus/sync/jitter_buffer.hpp>
 #include <chorus/sync/resampler.hpp>
 
-#include <cmath>
 #include <random>
 #include <vector>
 

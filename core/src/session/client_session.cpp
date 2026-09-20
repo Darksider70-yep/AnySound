@@ -2,10 +2,20 @@
 #include <chorus/proto/packet.hpp>
 
 #include <algorithm>
+#include <array>
 
 namespace chorus {
 
 namespace {
+
+constexpr size_t kDefaultClockPingSamples = 30;
+constexpr size_t kDefaultClockTrimSamples = 5;
+constexpr size_t kDefaultJitterCapacity = 30;
+constexpr size_t kDefaultJitterPrebuffer = 3;
+constexpr int kConnectTimeoutMs = 2000;
+constexpr int32_t kMinOffsetMs = -500;
+constexpr int32_t kMaxOffsetMs = 500;
+constexpr double kFrameDurationSec = 0.02;
 
 uint64_t current_steady_us() noexcept {
     const auto now = std::chrono::steady_clock::now().time_since_epoch();
@@ -17,9 +27,9 @@ uint64_t current_steady_us() noexcept {
 ClientSession::ClientSession(std::string_view client_name)
     : client_name_(client_name),
       timeline_buffer_(static_cast<size_t>(kSampleRate * 2)),
-      clock_estimator_(30, 5),
-      jitter_buffer_(30, 3),
-      drift_controller_(200.0, 30000) {}
+      clock_estimator_(kDefaultClockPingSamples, kDefaultClockTrimSamples),
+      jitter_buffer_(kDefaultJitterCapacity, kDefaultJitterPrebuffer),
+      drift_controller_(kDefaultMaxCorrectionPpm, kDefaultHardResyncThresholdUs) {}
 
 ClientSession::~ClientSession() {
     disconnect();
@@ -49,7 +59,7 @@ bool ClientSession::connect(std::string_view host_ip,
     state_.store(ClientSessionState::Connecting);
 
     const Endpoint host_ep{.address = host_ip_, .port = tcp_port_};
-    if (!tcp_stream_.connect(host_ep, 2000)) {
+    if (!tcp_stream_.connect(host_ep, kConnectTimeoutMs)) {
         state_.store(ClientSessionState::Disconnected);
         udp_socket_.close();
         return false;
@@ -108,22 +118,22 @@ void ClientSession::update() {
     if (tcp_stream_.is_connected()) {
         const auto messages = tcp_stream_.read_messages();
         for (const auto& msg : messages) {
-            std::visit([&](const auto& m) {
-                using T = std::decay_t<decltype(m)>;
-                if constexpr (std::is_same_v<T, WelcomeMessage>) {
-                    host_udp_port_ = m.udp_port;
+            std::visit([&](const auto& msg_data) {
+                using MsgType = std::decay_t<decltype(msg_data)>;
+                if constexpr (std::is_same_v<MsgType, WelcomeMessage>) {
+                    host_udp_port_ = msg_data.udp_port;
                     state_.store(ClientSessionState::Synchronizing);
-                } else if constexpr (std::is_same_v<T, RejectMessage>) {
-                    rejection_reason_ = m.reason;
+                } else if constexpr (std::is_same_v<MsgType, RejectMessage>) {
+                    rejection_reason_ = msg_data.reason;
                     state_.store(ClientSessionState::Rejected);
                     disconnect();
-                } else if constexpr (std::is_same_v<T, SetVolumeMessage>) {
-                    volume_.store(std::clamp(m.value, 0.0F, 1.0F));
-                } else if constexpr (std::is_same_v<T, SetMuteMessage>) {
-                    is_muted_.store(m.value);
-                } else if constexpr (std::is_same_v<T, SetOffsetMsMessage>) {
-                    offset_ms_.store(std::clamp(m.value, -500, 500));
-                } else if constexpr (std::is_same_v<T, ByeMessage>) {
+                } else if constexpr (std::is_same_v<MsgType, SetVolumeMessage>) {
+                    volume_.store(std::clamp(msg_data.value, 0.0F, 1.0F));
+                } else if constexpr (std::is_same_v<MsgType, SetMuteMessage>) {
+                    is_muted_.store(msg_data.value);
+                } else if constexpr (std::is_same_v<MsgType, SetOffsetMsMessage>) {
+                    offset_ms_.store(std::clamp(msg_data.value, kMinOffsetMs, kMaxOffsetMs));
+                } else if constexpr (std::is_same_v<MsgType, ByeMessage>) {
                     disconnect();
                 }
             }, msg);
@@ -162,7 +172,7 @@ void ClientSession::update() {
 }
 
 void ClientSession::send_clock_ping() {
-    const uint64_t t0 = current_steady_us();
+    const uint64_t time_t0 = current_steady_us();
     const PingPacket ping{
         .header = {
             .magic = kPacketMagic,
@@ -171,7 +181,7 @@ void ClientSession::send_clock_ping() {
             .session_id = 1
         },
         .ping_id = next_ping_id_++,
-        .t0 = t0
+        .t0 = time_t0
     };
 
     std::array<uint8_t, kPingPacketSize> ping_buf{};
@@ -192,7 +202,7 @@ void ClientSession::process_incoming_udp() {
             break;
         }
 
-        const uint64_t t3 = current_steady_us();
+        const uint64_t time_t3 = current_steady_us();
         const std::span<const uint8_t> pkt_span(packet_buf.data(), static_cast<size_t>(bytes));
         const auto header_opt = parse_header(pkt_span);
 
@@ -200,7 +210,7 @@ void ClientSession::process_incoming_udp() {
             if (header_opt->type == PacketType::Pong) {
                 const auto pong_opt = parse_pong_packet(pkt_span);
                 if (pong_opt.has_value()) {
-                    clock_estimator_.record_sample(pong_opt->ping_id, pong_opt->t0, pong_opt->t1, pong_opt->t2, t3);
+                    clock_estimator_.record_sample(pong_opt->ping_id, pong_opt->t0, pong_opt->t1, pong_opt->t2, time_t3);
                 }
             } else if (header_opt->type == PacketType::Audio) {
                 const auto audio_opt = parse_audio_packet(pkt_span);
@@ -240,19 +250,19 @@ void ClientSession::drain_jitter_and_play() {
                 // Apply local user volume and mute
                 const float vol = is_muted_.load() ? 0.0F : volume_.load();
                 if (vol != 1.0F) {
-                    for (float& s : pcm_decoded) {
-                        s *= vol;
+                    for (float& pcm_sample : pcm_decoded) {
+                        pcm_sample *= vol;
                     }
                 }
 
                 const int64_t user_offset_us = static_cast<int64_t>(offset_ms_.load()) * 1000;
-                const uint64_t local_play_us = static_cast<uint64_t>(
+                const auto local_play_us = static_cast<uint64_t>(
                     static_cast<int64_t>(clock_estimator_.host_to_local_us(jframe.play_at_host_us)) + user_offset_us
                 );
                 const uint64_t current_local_us = current_steady_us();
                 const int64_t phase_error_us = static_cast<int64_t>(local_play_us) - static_cast<int64_t>(current_local_us);
 
-                drift_controller_.update(phase_error_us, clock_estimator_.skew_ppm(), 0.02);
+                drift_controller_.update(phase_error_us, clock_estimator_.skew_ppm(), kFrameDurationSec);
                 if (drift_controller_.needs_hard_resync()) {
                     timeline_buffer_.reset();
                     drift_controller_.clear_resync();
@@ -302,7 +312,7 @@ void ClientSession::set_mute(bool mute) noexcept {
 }
 
 void ClientSession::set_offset_ms(int32_t offset_ms) {
-    offset_ms_.store(std::clamp(offset_ms, -500, 500));
+    offset_ms_.store(std::clamp(offset_ms, kMinOffsetMs, kMaxOffsetMs));
     if (tcp_stream_.is_connected()) {
         (void)tcp_stream_.send_message(SetOffsetMsMessage{.value = offset_ms_.load()});
     }
@@ -321,7 +331,7 @@ ClientStatsMessage ClientSession::stats() const {
         .loss_pct = (jitter_buffer_.total_received() > 0)
             ? (static_cast<double>(jitter_buffer_.lost_plc_count()) * 100.0 / static_cast<double>(jitter_buffer_.total_received() + jitter_buffer_.lost_plc_count()))
             : 0.0,
-        .buffer_ms = static_cast<uint32_t>(jitter_buffer_.size() * 20)
+        .buffer_ms = static_cast<uint32_t>(jitter_buffer_.size() * static_cast<size_t>(kFrameDurationMs))
     };
 }
 

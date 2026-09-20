@@ -1,9 +1,7 @@
-// NOLINTBEGIN
 #include <catch2/catch_test_macros.hpp>
 #include <chorus/sync/resampler.hpp>
 
 #include <cmath>
-#include <numbers>
 #include <vector>
 
 TEST_CASE("Resampler 1.0 ratio bypass bit-exactness", "[sync][resampler]") {

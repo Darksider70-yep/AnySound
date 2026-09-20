@@ -12,8 +12,6 @@
 
 namespace chorus {
 
-inline constexpr uint64_t kDefaultTargetLatencyMs = 300;
-
 enum class AppRole : uint8_t {
     Idle,
     Hosting,

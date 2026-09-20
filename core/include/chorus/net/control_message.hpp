@@ -1,6 +1,7 @@
 #pragma once
 
 #include <chorus/core.hpp>
+#include <chorus/codec/opus_codec.hpp>
 
 #include <cstdint>
 #include <optional>

@@ -8,6 +8,7 @@ namespace chorus {
 namespace {
 constexpr double kSineFreqHz = 440.0;
 constexpr double kTwoPi = 2.0 * std::numbers::pi;
+constexpr float kSineAmplitude = 0.3F;
 }  // namespace
 
 AppController::AppController()
@@ -60,7 +61,7 @@ bool AppController::join_host(std::string_view host_ip,
     stop_host();
     leave_host();
 
-    if (!client_session_.connect(host_ip, tcp_port, 47802, pin)) {
+    if (!client_session_.connect(host_ip, tcp_port, kDefaultClientDataPort, pin)) {
         return false;
     }
 
@@ -79,13 +80,13 @@ void AppController::generate_test_sine(std::span<float> out_pcm) {
     const double phase_inc = (kTwoPi * kSineFreqHz) / static_cast<double>(kSampleRate);
     const size_t frames = out_pcm.size() / static_cast<size_t>(kChannels);
     for (size_t i = 0; i < frames; ++i) {
-        const auto s = static_cast<float>(0.3 * std::sin(tone_phase_));
+        const auto sample_val = static_cast<float>(static_cast<double>(kSineAmplitude) * std::sin(tone_phase_));
         tone_phase_ += phase_inc;
         if (tone_phase_ >= kTwoPi) {
             tone_phase_ -= kTwoPi;
         }
-        out_pcm[i * 2] = s;
-        out_pcm[i * 2 + 1] = s;
+        out_pcm[i * 2] = sample_val;
+        out_pcm[(i * 2) + 1] = sample_val;
     }
 }
 

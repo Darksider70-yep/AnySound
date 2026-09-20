@@ -1,8 +1,5 @@
-// NOLINTBEGIN
 #include <catch2/catch_test_macros.hpp>
 #include <chorus/sync/drift_controller.hpp>
-
-#include <cmath>
 
 TEST_CASE("DriftController PI convergence and clamping", "[sync][drift]") {
     chorus::DriftController controller(200.0, 30000, 0.05, 0.005);

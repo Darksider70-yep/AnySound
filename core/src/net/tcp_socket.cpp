@@ -23,12 +23,14 @@
     constexpr int kSocketError = -1;
 #endif
 
-#include <algorithm>
 #include <array>
 
 namespace chorus {
 
 namespace {
+
+inline constexpr int kMillisPerSecond = 1000;
+inline constexpr size_t kRecvBufferSize = 4096;
 
 #ifdef _WIN32
 struct WinsockInit {
@@ -52,15 +54,15 @@ void ensure_winsock_initialized() {
 void ensure_winsock_initialized() {}
 #endif
 
-bool set_nonblocking(sock_t fd, bool non_blocking) noexcept {
+bool set_nonblocking(sock_t socket_fd, bool non_blocking) noexcept {
 #ifdef _WIN32
     u_long mode = non_blocking ? 1 : 0;
-    return (ioctlsocket(fd, static_cast<long>(FIONBIO), &mode) == 0);
+    return (ioctlsocket(socket_fd, static_cast<long>(FIONBIO), &mode) == 0);
 #else
-    int flags = fcntl(fd, F_GETFL, 0);
+    int flags = fcntl(socket_fd, F_GETFL, 0);
     if (flags < 0) return false;
     flags = non_blocking ? (flags | O_NONBLOCK) : (flags & ~O_NONBLOCK);
-    return (fcntl(fd, F_SETFL, flags) == 0);
+    return (fcntl(socket_fd, F_SETFL, flags) == 0);
 #endif
 }
 
@@ -108,8 +110,8 @@ bool TcpStream::connect(const Endpoint& endpoint, int timeout_ms) {
     close();
     peer_ = endpoint;
 
-    const sock_t fd = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
-    if (fd == kInvalidSocket) {
+    const sock_t socket_fd = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+    if (socket_fd == kInvalidSocket) {
         return false;
     }
 
@@ -118,44 +120,44 @@ bool TcpStream::connect(const Endpoint& endpoint, int timeout_ms) {
     addr.sin_port = htons(endpoint.port);
     if (inet_pton(AF_INET, endpoint.address.c_str(), &addr.sin_addr) <= 0) {
 #ifdef _WIN32
-        closesocket(fd);
+        closesocket(socket_fd);
 #else
-        ::close(fd);
+        ::close(socket_fd);
 #endif
         return false;
     }
 
     // Set non-blocking to honor timeout
-    set_nonblocking(fd, true);
+    set_nonblocking(socket_fd, true);
 
-    int res = ::connect(fd, reinterpret_cast<const sockaddr*>(&addr), sizeof(addr));
+    int res = ::connect(socket_fd, reinterpret_cast<const sockaddr*>(&addr), sizeof(addr));
     if (res == kSocketError) {
 #ifdef _WIN32
         const int err = WSAGetLastError();
         if (err != WSAEWOULDBLOCK && err != WSAEINPROGRESS) {
-            closesocket(fd);
+            closesocket(socket_fd);
             return false;
         }
 #else
         if (errno != EINPROGRESS) {
-            ::close(fd);
+            ::close(socket_fd);
             return false;
         }
 #endif
         fd_set write_fds;
         FD_ZERO(&write_fds);
-        FD_SET(fd, &write_fds);
+        FD_SET(socket_fd, &write_fds);
 
-        timeval tv{};
-        tv.tv_sec = timeout_ms / 1000;
-        tv.tv_usec = (timeout_ms % 1000) * 1000;
+        timeval time_val{};
+        time_val.tv_sec = timeout_ms / kMillisPerSecond;
+        time_val.tv_usec = (timeout_ms % kMillisPerSecond) * kMillisPerSecond;
 
-        res = select(static_cast<int>(fd + 1), nullptr, &write_fds, nullptr, &tv);
+        res = select(static_cast<int>(socket_fd + 1), nullptr, &write_fds, nullptr, &time_val);
         if (res <= 0) {
 #ifdef _WIN32
-            closesocket(fd);
+            closesocket(socket_fd);
 #else
-            ::close(fd);
+            ::close(socket_fd);
 #endif
             return false;
         }
@@ -163,9 +165,9 @@ bool TcpStream::connect(const Endpoint& endpoint, int timeout_ms) {
 
     // Disable Nagle's algorithm for low-latency control messages
     int nodelay = 1;
-    setsockopt(fd, IPPROTO_TCP, TCP_NODELAY, reinterpret_cast<const char*>(&nodelay), sizeof(nodelay));
+    setsockopt(socket_fd, IPPROTO_TCP, TCP_NODELAY, reinterpret_cast<const char*>(&nodelay), sizeof(nodelay));
 
-    socket_fd_ = static_cast<intptr_t>(fd);
+    socket_fd_ = static_cast<intptr_t>(socket_fd);
     return true;
 }
 
@@ -179,11 +181,11 @@ bool TcpStream::send_message(const ControlMessage& message) {
         return false;
     }
 
-    const auto fd = static_cast<sock_t>(socket_fd_);
+    const auto socket_fd = static_cast<sock_t>(socket_fd_);
     size_t total_sent = 0;
 
     while (total_sent < payload.size()) {
-        const int sent = send(fd, reinterpret_cast<const char*>(payload.data() + total_sent),
+        const int sent = send(socket_fd, reinterpret_cast<const char*>(payload.data() + total_sent),
                               static_cast<int>(payload.size() - total_sent), 0);
         if (sent <= 0) {
 #ifdef _WIN32
@@ -210,11 +212,11 @@ std::vector<ControlMessage> TcpStream::read_messages() {
         return result;
     }
 
-    const auto fd = static_cast<sock_t>(socket_fd_);
-    std::array<char, 4096> recv_buf{};
+    const auto socket_fd = static_cast<sock_t>(socket_fd_);
+    std::array<char, kRecvBufferSize> recv_buf{};
 
     while (true) {
-        const int bytes = recv(fd, recv_buf.data(), static_cast<int>(recv_buf.size()), 0);
+        const int bytes = recv(socket_fd, recv_buf.data(), static_cast<int>(recv_buf.size()), 0);
         if (bytes > 0) {
             rx_buffer_.insert(rx_buffer_.end(), recv_buf.begin(), recv_buf.begin() + bytes);
         } else if (bytes == 0) {
@@ -255,9 +257,9 @@ std::vector<ControlMessage> TcpStream::read_messages() {
             payload_len
         );
 
-        const auto msg_opt = parse_control_message(json_view);
+        auto msg_opt = parse_control_message(json_view);
         if (msg_opt.has_value()) {
-            result.push_back(std::move(*msg_opt));
+            result.push_back(std::move(msg_opt.value()));
         }
 
         rx_buffer_.erase(rx_buffer_.begin(), rx_buffer_.begin() + 4 + static_cast<ptrdiff_t>(payload_len));
@@ -268,11 +270,11 @@ std::vector<ControlMessage> TcpStream::read_messages() {
 
 void TcpStream::close() noexcept {
     if (is_connected()) {
-        const auto fd = static_cast<sock_t>(socket_fd_);
+        const auto socket_fd = static_cast<sock_t>(socket_fd_);
 #ifdef _WIN32
-        closesocket(fd);
+        closesocket(socket_fd);
 #else
-        ::close(fd);
+        ::close(socket_fd);
 #endif
         socket_fd_ = -1;
     }
@@ -318,13 +320,13 @@ TcpListener& TcpListener::operator=(TcpListener&& other) noexcept {
 bool TcpListener::listen(uint16_t port, std::string_view interface_ip) {
     close();
 
-    const sock_t fd = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
-    if (fd == kInvalidSocket) {
+    const sock_t socket_fd = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+    if (socket_fd == kInvalidSocket) {
         return false;
     }
 
     int opt = 1;
-    setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, reinterpret_cast<const char*>(&opt), sizeof(opt));
+    setsockopt(socket_fd, SOL_SOCKET, SO_REUSEADDR, reinterpret_cast<const char*>(&opt), sizeof(opt));
 
     sockaddr_in addr{};
     addr.sin_family = AF_INET;
@@ -335,33 +337,33 @@ bool TcpListener::listen(uint16_t port, std::string_view interface_ip) {
         std::string ip_str(interface_ip);
         if (inet_pton(AF_INET, ip_str.c_str(), &addr.sin_addr) <= 0) {
 #ifdef _WIN32
-            closesocket(fd);
+            closesocket(socket_fd);
 #else
-            ::close(fd);
+            ::close(socket_fd);
 #endif
             return false;
         }
     }
 
-    if (::bind(fd, reinterpret_cast<const sockaddr*>(&addr), sizeof(addr)) == kSocketError) {
+    if (::bind(socket_fd, reinterpret_cast<const sockaddr*>(&addr), sizeof(addr)) == kSocketError) {
 #ifdef _WIN32
-        closesocket(fd);
+        closesocket(socket_fd);
 #else
-        ::close(fd);
+        ::close(socket_fd);
 #endif
         return false;
     }
 
-    if (::listen(fd, SOMAXCONN) == kSocketError) {
+    if (::listen(socket_fd, SOMAXCONN) == kSocketError) {
 #ifdef _WIN32
-        closesocket(fd);
+        closesocket(socket_fd);
 #else
-        ::close(fd);
+        ::close(socket_fd);
 #endif
         return false;
     }
 
-    set_nonblocking(fd, true);
+    set_nonblocking(socket_fd, true);
 
     uint16_t actual_port = port;
     if (actual_port == 0) {
@@ -371,22 +373,22 @@ bool TcpListener::listen(uint16_t port, std::string_view interface_ip) {
 #else
         socklen_t bound_len = sizeof(bound_addr);
 #endif
-        if (getsockname(fd, reinterpret_cast<sockaddr*>(&bound_addr), &bound_len) == 0) {
+        if (getsockname(socket_fd, reinterpret_cast<sockaddr*>(&bound_addr), &bound_len) == 0) {
             actual_port = ntohs(bound_addr.sin_port);
         }
     }
 
-    socket_fd_ = static_cast<intptr_t>(fd);
+    socket_fd_ = static_cast<intptr_t>(socket_fd);
     port_ = actual_port;
     return true;
 }
 
-std::unique_ptr<TcpStream> TcpListener::accept_client() {
+std::unique_ptr<TcpStream> TcpListener::accept_client() const {
     if (!is_listening()) {
         return nullptr;
     }
 
-    const auto fd = static_cast<sock_t>(socket_fd_);
+    const auto socket_fd = static_cast<sock_t>(socket_fd_);
     sockaddr_in client_addr{};
 #ifdef _WIN32
     int addr_len = sizeof(client_addr);
@@ -394,7 +396,7 @@ std::unique_ptr<TcpStream> TcpListener::accept_client() {
     socklen_t addr_len = sizeof(client_addr);
 #endif
 
-    const sock_t client_fd = accept(fd, reinterpret_cast<sockaddr*>(&client_addr), &addr_len);
+    const sock_t client_fd = accept(socket_fd, reinterpret_cast<sockaddr*>(&client_addr), &addr_len);
     if (client_fd == kInvalidSocket) {
         return nullptr;
     }
@@ -412,11 +414,11 @@ std::unique_ptr<TcpStream> TcpListener::accept_client() {
 
 void TcpListener::close() noexcept {
     if (is_listening()) {
-        const auto fd = static_cast<sock_t>(socket_fd_);
+        const auto socket_fd = static_cast<sock_t>(socket_fd_);
 #ifdef _WIN32
-        closesocket(fd);
+        closesocket(socket_fd);
 #else
-        ::close(fd);
+        ::close(socket_fd);
 #endif
         socket_fd_ = -1;
         port_ = 0;

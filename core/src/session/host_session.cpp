@@ -1,11 +1,19 @@
 #include <chorus/session/host_session.hpp>
 #include <chorus/proto/packet.hpp>
 
+#include <algorithm>
+#include <array>
 #include <chrono>
 
 namespace chorus {
 
 namespace {
+
+constexpr size_t kMaxClients = 8;
+constexpr uint16_t kDefaultClientDataPort = 47802;
+constexpr size_t kPingBufferSize = 128;
+constexpr int32_t kMinOffsetMs = -500;
+constexpr int32_t kMaxOffsetMs = 500;
 
 uint64_t current_steady_us() noexcept {
     const auto now = std::chrono::steady_clock::now().time_since_epoch();
@@ -87,7 +95,7 @@ void HostSession::update() {
         }
 
         std::lock_guard<std::mutex> lock(clients_mutex_);
-        if (clients_.size() >= 8) {
+        if (clients_.size() >= kMaxClients) {
             // Server full
             (void)new_client_stream->send_message(RejectMessage{.reason = "full"});
             new_client_stream->close();
@@ -102,7 +110,7 @@ void HostSession::update() {
                 .platform = "Unknown",
                 .address = peer.address,
                 .control_port = peer.port,
-                .udp_data_port = 47802,  // Default client listening port
+                .udp_data_port = kDefaultClientDataPort,
                 .authenticated = false,
                 .volume = 1.0F,
                 .is_muted = false,
@@ -127,8 +135,8 @@ void HostSession::update() {
         }
 
         // Clean up disconnected clients
-        std::erase_if(clients_, [](const ConnectedClient& c) {
-            return !c.stream || !c.stream->is_connected();
+        std::erase_if(clients_, [](const ConnectedClient& client_item) {
+            return !client_item.stream || !client_item.stream->is_connected();
         });
     }
 
@@ -180,7 +188,7 @@ void HostSession::handle_client_message(ConnectedClient& client, const ControlMe
 }
 
 void HostSession::handle_incoming_clock_pings() {
-    std::array<uint8_t, 128> recv_buf{};
+    std::array<uint8_t, kPingBufferSize> recv_buf{};
     Endpoint sender;
 
     while (true) {
@@ -189,20 +197,20 @@ void HostSession::handle_incoming_clock_pings() {
             break;
         }
 
-        const uint64_t t1 = current_steady_us();
+        const uint64_t timestamp_t1 = current_steady_us();
         const auto ping_opt = parse_ping_packet(std::span<const uint8_t>(recv_buf.data(), static_cast<size_t>(bytes)));
         if (ping_opt.has_value()) {
             // Update sender's UDP data port if matched
             {
                 std::lock_guard<std::mutex> lock(clients_mutex_);
-                for (auto& c : clients_) {
-                    if (c.info.address == sender.address) {
-                        c.info.udp_data_port = sender.port;
+                for (auto& client_entry : clients_) {
+                    if (client_entry.info.address == sender.address) {
+                        client_entry.info.udp_data_port = sender.port;
                     }
                 }
             }
 
-            const uint64_t t2 = current_steady_us();
+            const uint64_t timestamp_t2 = current_steady_us();
             const PongPacket pong{
                 .header = {
                     .magic = kPacketMagic,
@@ -212,8 +220,8 @@ void HostSession::handle_incoming_clock_pings() {
                 },
                 .ping_id = ping_opt->ping_id,
                 .t0 = ping_opt->t0,
-                .t1 = t1,
-                .t2 = t2
+                .t1 = timestamp_t1,
+                .t2 = timestamp_t2
             };
 
             std::array<uint8_t, kPongPacketSize> pong_buf{};
@@ -283,11 +291,11 @@ std::string HostSession::pin() const {
 
 bool HostSession::set_client_volume(uint32_t client_id, float volume) {
     std::lock_guard<std::mutex> lock(clients_mutex_);
-    for (auto& c : clients_) {
-        if (c.info.id == client_id) {
-            c.info.volume = std::clamp(volume, 0.0F, 1.0F);
-            if (c.stream && c.stream->is_connected()) {
-                (void)c.stream->send_message(SetVolumeMessage{.value = c.info.volume});
+    for (auto& client_entry : clients_) {
+        if (client_entry.info.id == client_id) {
+            client_entry.info.volume = std::clamp(volume, 0.0F, 1.0F);
+            if (client_entry.stream && client_entry.stream->is_connected()) {
+                (void)client_entry.stream->send_message(SetVolumeMessage{.value = client_entry.info.volume});
             }
             return true;
         }
@@ -297,11 +305,11 @@ bool HostSession::set_client_volume(uint32_t client_id, float volume) {
 
 bool HostSession::set_client_mute(uint32_t client_id, bool mute) {
     std::lock_guard<std::mutex> lock(clients_mutex_);
-    for (auto& c : clients_) {
-        if (c.info.id == client_id) {
-            c.info.is_muted = mute;
-            if (c.stream && c.stream->is_connected()) {
-                (void)c.stream->send_message(SetMuteMessage{.value = mute});
+    for (auto& client_entry : clients_) {
+        if (client_entry.info.id == client_id) {
+            client_entry.info.is_muted = mute;
+            if (client_entry.stream && client_entry.stream->is_connected()) {
+                (void)client_entry.stream->send_message(SetMuteMessage{.value = mute});
             }
             return true;
         }
@@ -311,11 +319,11 @@ bool HostSession::set_client_mute(uint32_t client_id, bool mute) {
 
 bool HostSession::set_client_offset_ms(uint32_t client_id, int32_t offset_ms) {
     std::lock_guard<std::mutex> lock(clients_mutex_);
-    for (auto& c : clients_) {
-        if (c.info.id == client_id) {
-            c.info.offset_ms = std::clamp(offset_ms, -500, 500);
-            if (c.stream && c.stream->is_connected()) {
-                (void)c.stream->send_message(SetOffsetMsMessage{.value = c.info.offset_ms});
+    for (auto& client_entry : clients_) {
+        if (client_entry.info.id == client_id) {
+            client_entry.info.offset_ms = std::clamp(offset_ms, kMinOffsetMs, kMaxOffsetMs);
+            if (client_entry.stream && client_entry.stream->is_connected()) {
+                (void)client_entry.stream->send_message(SetOffsetMsMessage{.value = client_entry.info.offset_ms});
             }
             return true;
         }
@@ -327,16 +335,16 @@ std::vector<ClientInfo> HostSession::client_list() const {
     std::vector<ClientInfo> list;
     std::lock_guard<std::mutex> lock(clients_mutex_);
     list.reserve(clients_.size());
-    for (const auto& c : clients_) {
-        list.push_back(c.info);
+    for (const auto& client_entry : clients_) {
+        list.push_back(client_entry.info);
     }
     return list;
 }
 
 size_t HostSession::authenticated_client_count() const {
     std::lock_guard<std::mutex> lock(clients_mutex_);
-    return static_cast<size_t>(std::count_if(clients_.begin(), clients_.end(), [](const ConnectedClient& c) {
-        return c.info.authenticated;
+    return static_cast<size_t>(std::count_if(clients_.begin(), clients_.end(), [](const ConnectedClient& client_item) {
+        return client_item.info.authenticated;
     }));
 }
 

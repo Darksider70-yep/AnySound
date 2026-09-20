@@ -74,12 +74,78 @@ json message_to_json(const ControlMessage& message) {
     }, message);
 }
 
+HelloMessage parse_hello(const json& json_obj) {
+    HelloMessage msg;
+    if (json_obj.contains("name") && json_obj["name"].is_string()) {
+        msg.name = json_obj["name"].get<std::string>();
+    }
+    if (json_obj.contains("platform") && json_obj["platform"].is_string()) {
+        msg.platform = json_obj["platform"].get<std::string>();
+    }
+    if (json_obj.contains("protocol") && json_obj["protocol"].is_number()) {
+        msg.protocol = json_obj["protocol"].get<uint32_t>();
+    }
+    if (json_obj.contains("pin") && json_obj["pin"].is_string()) {
+        msg.pin = json_obj["pin"].get<std::string>();
+    }
+    return msg;
+}
+
+WelcomeMessage parse_welcome(const json& json_obj) {
+    WelcomeMessage msg;
+    if (json_obj.contains("sessionId") && json_obj["sessionId"].is_number()) {
+        msg.session_id = json_obj["sessionId"].get<uint32_t>();
+    }
+    if (json_obj.contains("udpPort") && json_obj["udpPort"].is_number()) {
+        msg.udp_port = json_obj["udpPort"].get<uint16_t>();
+    }
+    if (json_obj.contains("sampleRate") && json_obj["sampleRate"].is_number()) {
+        msg.sample_rate = json_obj["sampleRate"].get<uint32_t>();
+    }
+    if (json_obj.contains("channels") && json_obj["channels"].is_number()) {
+        msg.channels = json_obj["channels"].get<uint32_t>();
+    }
+    if (json_obj.contains("frameMs") && json_obj["frameMs"].is_number()) {
+        msg.frame_ms = json_obj["frameMs"].get<uint32_t>();
+    }
+    if (json_obj.contains("targetLatencyMs") && json_obj["targetLatencyMs"].is_number()) {
+        msg.target_latency_ms = json_obj["targetLatencyMs"].get<uint64_t>();
+    }
+    if (json_obj.contains("hostUs") && json_obj["hostUs"].is_number()) {
+        msg.host_us = json_obj["hostUs"].get<uint64_t>();
+    }
+    return msg;
+}
+
+ClientStatsMessage parse_stats(const json& json_obj) {
+    ClientStatsMessage msg;
+    if (json_obj.contains("syncErrorUs") && json_obj["syncErrorUs"].is_number()) {
+        msg.sync_error_us = json_obj["syncErrorUs"].get<int64_t>();
+    }
+    if (json_obj.contains("skewPpm") && json_obj["skewPpm"].is_number()) {
+        msg.skew_ppm = json_obj["skewPpm"].get<double>();
+    }
+    if (json_obj.contains("underruns") && json_obj["underruns"].is_number()) {
+        msg.underruns = json_obj["underruns"].get<uint64_t>();
+    }
+    if (json_obj.contains("late") && json_obj["late"].is_number()) {
+        msg.late = json_obj["late"].get<uint64_t>();
+    }
+    if (json_obj.contains("lossPct") && json_obj["lossPct"].is_number()) {
+        msg.loss_pct = json_obj["lossPct"].get<double>();
+    }
+    if (json_obj.contains("bufferMs") && json_obj["bufferMs"].is_number()) {
+        msg.buffer_ms = json_obj["bufferMs"].get<uint32_t>();
+    }
+    return msg;
+}
+
 }  // namespace
 
 size_t serialize_control_message(const ControlMessage& message, std::span<uint8_t> dest) noexcept {
     try {
-        const json j = message_to_json(message);
-        const std::string serialized = j.dump();
+        const json json_obj = message_to_json(message);
+        const std::string serialized = json_obj.dump();
         const size_t payload_len = serialized.size();
         const size_t total_len = payload_len + 4;
 
@@ -96,8 +162,8 @@ size_t serialize_control_message(const ControlMessage& message, std::span<uint8_
 }
 
 std::vector<uint8_t> serialize_control_message_vec(const ControlMessage& message) {
-    const json j = message_to_json(message);
-    const std::string serialized = j.dump();
+    const json json_obj = message_to_json(message);
+    const std::string serialized = json_obj.dump();
     const auto payload_len = static_cast<uint32_t>(serialized.size());
 
     std::vector<uint8_t> buf(serialized.size() + 4);
@@ -108,120 +174,48 @@ std::vector<uint8_t> serialize_control_message_vec(const ControlMessage& message
 
 std::optional<ControlMessage> parse_control_message(std::string_view json_str) noexcept {
     try {
-        const auto j = json::parse(json_str);
-        if (!j.is_object() || !j.contains("type") || !j["type"].is_string()) {
+        const auto json_obj = json::parse(json_str);
+        if (!json_obj.is_object() || !json_obj.contains("type") || !json_obj["type"].is_string()) {
             return std::nullopt;
         }
 
-        const std::string type = j["type"].get<std::string>();
+        const std::string type_name = json_obj["type"].get<std::string>();
 
-        if (type == "hello") {
-            HelloMessage msg;
-            if (j.contains("name") && j["name"].is_string()) {
-                msg.name = j["name"].get<std::string>();
-            }
-            if (j.contains("platform") && j["platform"].is_string()) {
-                msg.platform = j["platform"].get<std::string>();
-            }
-            if (j.contains("protocol") && j["protocol"].is_number()) {
-                msg.protocol = j["protocol"].get<uint32_t>();
-            }
-            if (j.contains("pin") && j["pin"].is_string()) {
-                msg.pin = j["pin"].get<std::string>();
-            }
-            return msg;
+        if (type_name == "hello") {
+            return parse_hello(json_obj);
         }
-
-        if (type == "welcome") {
-            WelcomeMessage msg;
-            if (j.contains("sessionId") && j["sessionId"].is_number()) {
-                msg.session_id = j["sessionId"].get<uint32_t>();
-            }
-            if (j.contains("udpPort") && j["udpPort"].is_number()) {
-                msg.udp_port = j["udpPort"].get<uint16_t>();
-            }
-            if (j.contains("sampleRate") && j["sampleRate"].is_number()) {
-                msg.sample_rate = j["sampleRate"].get<uint32_t>();
-            }
-            if (j.contains("channels") && j["channels"].is_number()) {
-                msg.channels = j["channels"].get<uint32_t>();
-            }
-            if (j.contains("frameMs") && j["frameMs"].is_number()) {
-                msg.frame_ms = j["frameMs"].get<uint32_t>();
-            }
-            if (j.contains("targetLatencyMs") && j["targetLatencyMs"].is_number()) {
-                msg.target_latency_ms = j["targetLatencyMs"].get<uint64_t>();
-            }
-            if (j.contains("hostUs") && j["hostUs"].is_number()) {
-                msg.host_us = j["hostUs"].get<uint64_t>();
-            }
-            return msg;
+        if (type_name == "welcome") {
+            return parse_welcome(json_obj);
         }
-
-        if (type == "reject") {
-            RejectMessage msg;
-            if (j.contains("reason") && j["reason"].is_string()) {
-                msg.reason = j["reason"].get<std::string>();
-            }
-            return msg;
+        if (type_name == "reject") {
+            const std::string reason = (json_obj.contains("reason") && json_obj["reason"].is_string())
+                ? json_obj["reason"].get<std::string>() : "bad_pin";
+            return RejectMessage{.reason = reason};
         }
-
-        if (type == "set_volume") {
-            SetVolumeMessage msg;
-            if (j.contains("value") && j["value"].is_number()) {
-                msg.value = j["value"].get<float>();
-            }
-            return msg;
+        if (type_name == "set_volume") {
+            const float val = (json_obj.contains("value") && json_obj["value"].is_number())
+                ? json_obj["value"].get<float>() : 1.0F;
+            return SetVolumeMessage{.value = val};
         }
-
-        if (type == "set_mute") {
-            SetMuteMessage msg;
-            if (j.contains("value") && j["value"].is_boolean()) {
-                msg.value = j["value"].get<bool>();
-            }
-            return msg;
+        if (type_name == "set_mute") {
+            const bool val = (json_obj.contains("value") && json_obj["value"].is_boolean())
+                ? json_obj["value"].get<bool>() : false;
+            return SetMuteMessage{.value = val};
         }
-
-        if (type == "set_offset_ms") {
-            SetOffsetMsMessage msg;
-            if (j.contains("value") && j["value"].is_number()) {
-                msg.value = j["value"].get<int32_t>();
-            }
-            return msg;
+        if (type_name == "set_offset_ms") {
+            const int32_t val = (json_obj.contains("value") && json_obj["value"].is_number())
+                ? json_obj["value"].get<int32_t>() : 0;
+            return SetOffsetMsMessage{.value = val};
         }
-
-        if (type == "set_target_latency_ms") {
-            SetTargetLatencyMsMessage msg;
-            if (j.contains("value") && j["value"].is_number()) {
-                msg.value = j["value"].get<uint64_t>();
-            }
-            return msg;
+        if (type_name == "set_target_latency_ms") {
+            const uint64_t val = (json_obj.contains("value") && json_obj["value"].is_number())
+                ? json_obj["value"].get<uint64_t>() : kDefaultTargetLatencyMs;
+            return SetTargetLatencyMsMessage{.value = val};
         }
-
-        if (type == "stats") {
-            ClientStatsMessage msg;
-            if (j.contains("syncErrorUs") && j["syncErrorUs"].is_number()) {
-                msg.sync_error_us = j["syncErrorUs"].get<int64_t>();
-            }
-            if (j.contains("skewPpm") && j["skewPpm"].is_number()) {
-                msg.skew_ppm = j["skewPpm"].get<double>();
-            }
-            if (j.contains("underruns") && j["underruns"].is_number()) {
-                msg.underruns = j["underruns"].get<uint64_t>();
-            }
-            if (j.contains("late") && j["late"].is_number()) {
-                msg.late = j["late"].get<uint64_t>();
-            }
-            if (j.contains("lossPct") && j["lossPct"].is_number()) {
-                msg.loss_pct = j["lossPct"].get<double>();
-            }
-            if (j.contains("bufferMs") && j["bufferMs"].is_number()) {
-                msg.buffer_ms = j["bufferMs"].get<uint32_t>();
-            }
-            return msg;
+        if (type_name == "stats") {
+            return parse_stats(json_obj);
         }
-
-        if (type == "bye") {
+        if (type_name == "bye") {
             return ByeMessage{};
         }
 

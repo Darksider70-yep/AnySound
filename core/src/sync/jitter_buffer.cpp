@@ -69,15 +69,15 @@ JitterPopResult JitterBuffer::pop(JitterFrame& frame_out) {
         return JitterPopResult::Empty;
     }
 
-    const auto it = queue_.begin();
-    if (it->first == next_expected_seq_) {
-        frame_out = std::move(it->second);
-        queue_.erase(it);
+    const auto frame_iter = queue_.begin();
+    if (frame_iter->first == next_expected_seq_) {
+        frame_out = std::move(frame_iter->second);
+        queue_.erase(frame_iter);
         next_expected_seq_++;
         return JitterPopResult::Ready;
     }
 
-    if (it->first > next_expected_seq_) {
+    if (frame_iter->first > next_expected_seq_) {
         // Missing frame in sequence - declare packet loss so caller synthesizes PLC
         lost_plc_count_++;
         next_expected_seq_++;
@@ -85,7 +85,7 @@ JitterPopResult JitterBuffer::pop(JitterFrame& frame_out) {
     }
 
     // In case next_expected_seq_ is somehow ahead of queue head
-    queue_.erase(it);
+    queue_.erase(frame_iter);
     return pop(frame_out);
 }
 

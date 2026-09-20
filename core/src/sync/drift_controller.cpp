@@ -5,14 +5,21 @@
 
 namespace chorus {
 
+namespace {
+
+constexpr double kMaxDtSec = 5.0;
+constexpr double kPpmScaling = 1000000.0;
+
+}  // namespace
+
 DriftController::DriftController(double max_correction_ppm,
                                  int64_t hard_resync_threshold_us,
-                                 double kp,
-                                 double ki)
+                                 double prop_gain,
+                                 double integral_gain)
     : max_correction_ppm_(max_correction_ppm),
       hard_resync_threshold_us_(hard_resync_threshold_us),
-      kp_(kp),
-      ki_(ki) {}
+      kp_(prop_gain),
+      ki_(integral_gain) {}
 
 void DriftController::update(int64_t phase_error_us, double skew_ppm, double dt_sec) noexcept {
     if (std::abs(phase_error_us) > hard_resync_threshold_us_) {
@@ -21,7 +28,7 @@ void DriftController::update(int64_t phase_error_us, double skew_ppm, double dt_
         return;
     }
 
-    if (dt_sec > 0.0 && dt_sec < 5.0) {
+    if (dt_sec > 0.0 && dt_sec < kMaxDtSec) {
         integral_error_us_ += static_cast<double>(phase_error_us) * dt_sec;
         // Anti-windup clamping on integral term
         const double max_integral = max_correction_ppm_ / std::max(ki_, 1e-6);
@@ -34,7 +41,7 @@ void DriftController::update(int64_t phase_error_us, double skew_ppm, double dt_
 
     // Total correction = static clock skew + dynamic phase correction, clamped to max allowed
     total_correction_ppm_ = std::clamp(skew_ppm + dynamic_correction_ppm_, -max_correction_ppm_, max_correction_ppm_);
-    resampler_ratio_ = 1.0 + (total_correction_ppm_ / 1000000.0);
+    resampler_ratio_ = 1.0 + (total_correction_ppm_ / kPpmScaling);
 }
 
 double DriftController::resampler_ratio() const noexcept {

@@ -65,7 +65,7 @@ public:
 
     /// @brief Non-blocking accept for an incoming client connection.
     /// @return Unique pointer to TcpStream, or nullptr if no connection pending.
-    std::unique_ptr<TcpStream> accept_client();
+    [[nodiscard]] std::unique_ptr<TcpStream> accept_client() const;
 
     /// @brief Closes listener socket.
     void close() noexcept;
