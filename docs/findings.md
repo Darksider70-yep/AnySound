@@ -89,3 +89,26 @@ This document tracks empirical measurements, hardware behavior observations, and
   - Implemented 30 fps throttled redraw and reduced-motion fallback modes.
 - **Interactive Companion UI (`apps/web_ui/index.html`):**
   - Standalone browser-renderable interface mirroring `Ui.md` with active sonar canvas animations, dynamic device rows, and live theme switching.
+
+---
+
+## Phase 6: Android Client Findings & Architecture
+- **Android NDK C++20 JNI Bridge (`apps/android/app/src/main/cpp/chorus_jni.cpp`):**
+  - Compiled with Clang NDK toolchain targeting `minSdk = 26` (Android 8.0+), linking `chorus_core`, `libopus`, `OpenSLES`, `aaudio`, `log`, and `android`.
+  - Clean JNI exports for `NativeChorusBridge` translating `AppController` commands (`joinHost`, `leaveHost`, `startHost`, `setVolume`, `setMute`, `setOffsetMs`, `update`) and serializing comprehensive `AppSnapshot` states into JSON strings without reflection overhead.
+- **Low-Power Foreground Service & Wi-Fi Lock (`ChorusPlaybackService.kt`):**
+  - Implements `FOREGROUND_SERVICE_MEDIA_PLAYBACK` to keep audio processing alive when the screen is off or the app is minimized.
+  - Automatically acquires `PowerManager.PARTIAL_WAKE_LOCK` and `WifiManager.WIFI_MODE_FULL_LOW_LATENCY` (or `WIFI_MODE_FULL_HIGH_PERF` on legacy API versions), preventing Wi-Fi power-saving sleep cycles from injecting artificial packet jitter into the RTP stream.
+  - Periodic 50 Hz coroutine tick ensures sub-millisecond timeline synchronization and updates foreground notification badges.
+- **Network Service Discovery (`NsdDiscoveryManager.kt`):**
+  - Integrates Android `NsdManager` DNS-SD listener for `_chorus._tcp.` services, enabling zero-configuration host discovery on local Wi-Fi.
+- **Jetpack Compose Design System (`apps/android/app/src/main/java/dev/chorus/app/ui/`):**
+  - Complete token-accurate implementation of `Ui.md`: `Theme.kt` with dark/light themes (`harbor`, `deck`, `line`, `fog`, `mist`, `sonar`, `drift`, `lost`), tabular typography (`Type.kt`), and custom components:
+    - `SonarRingView`: multi-layer animated concentric sonar ripples driven by `syncErrorMs`.
+    - `SyncBadge`: pill indicator reflecting synchronization states (`Tight`, `Drifting`, `OutOfSync`, `Connecting`, `Lost`).
+    - `VolumeSlider`: customized touch slider with mute toggle and volume percentage display.
+    - `DelayStepper`: per-device ±500 ms audio offset calibration.
+  - Full screen flows: `HomeScreen`, `ClientFindScreen`, `ClientListeningScreen`, `HostScreen`, `CalibrateScreen`, and `SettingsScreen`.
+- **Deep Linking:**
+  - AndroidManifest intent-filter handles `chorus://<ip>:<port>?pin=<pin>` URI schemes for instant connection via QR code scans.
+
