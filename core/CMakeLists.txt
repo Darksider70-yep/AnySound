@@ -16,6 +16,10 @@ add_library(chorus_core STATIC
     src/session/host_session.cpp
     src/session/client_session.cpp
     src/app/app_controller.cpp
+    src/net/crypto_channel.cpp
+    src/sync/latency_tuner.cpp
+    src/diagnostic/diagnostic_logger.cpp
+    src/playback/delayed_host_renderer.cpp
 )
 
 target_include_directories(chorus_core

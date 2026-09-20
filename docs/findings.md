@@ -112,3 +112,20 @@ This document tracks empirical measurements, hardware behavior observations, and
 - **Deep Linking:**
   - AndroidManifest intent-filter handles `chorus://<ip>:<port>?pin=<pin>` URI schemes for instant connection via QR code scans.
 
+---
+
+## Phase 7: Hardening & Extras Findings & Verification
+- **Authenticated AEAD Transport Encryption (`CryptoChannel`):**
+  - Standard RFC 8439 ChaCha20-Poly1305 symmetric cipher with constant-time MAC tag calculation and verification.
+  - Per-packet 96-bit monotonically increasing nonces coupled with a 64-packet sliding window anti-replay bitmask.
+  - Validated zero-overhead in-place encryption/decryption with complete rejection of tampered ciphertexts, mismatched AADs, and replayed packets.
+  - HKDF-SHA256 key derivation with salt ensures secure session key generation bound to session PINs.
+- **Adaptive Latency & Bitrate Auto-Tuning (`LatencyTuner`):**
+  - Dynamic RTT variance and standard deviation jitter estimation computes safe playout latency recommendations: $\text{targetLatencyMs} = \text{p95\_RTT} + 3 \times \sigma_{\text{jitter}} + 40\text{ ms}$, quantized to 10 ms increments.
+  - Automatic Opus bitrate scaling and FEC adjustment based on sliding-window packet loss telemetry ($<1\%$ loss: 160 kbps High fidelity, $1-5\%$ loss: 96 kbps Standard, $>5\%$ loss: 48 kbps Resilient).
+- **Delayed Host Playout Mode (`DelayedHostRenderer`):**
+  - Host captures system loopback and feeds PCM into an internal `TimelineBuffer` scheduled at $t + \text{targetLatencyMs}$, enabling the host's physical speakers to play in perfect sync with all remote clients without feedback loops.
+- **Diagnostic Logging & Export (`DiagnosticLogger`):**
+  - Thread-safe, zero-allocation ring buffer capturing state transitions, clock sync events, jitter spikes, and hard resyncs.
+  - Structured JSON export provides instantaneous diagnostic bundles for CLI and GUI troubleshooting.
+

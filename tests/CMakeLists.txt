@@ -29,6 +29,9 @@ add_executable(chorus_unit_tests
     unit/test_pin_authenticator.cpp
     unit/test_tcp_socket.cpp
     unit/test_host_fanout.cpp
+    unit/test_crypto_channel.cpp
+    unit/test_latency_tuner.cpp
+    unit/test_delayed_host.cpp
 )
 
 target_link_libraries(chorus_unit_tests

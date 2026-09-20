@@ -13,7 +13,6 @@
 namespace chorus {
 
 inline constexpr size_t kMaxControlMessageSize = 65536;  // 64 KB max
-inline constexpr uint64_t kDefaultTargetLatencyMs = 300;
 
 struct HelloMessage {
     std::string name{"Chorus Client"};
