@@ -14,6 +14,9 @@ endif()
 
 add_executable(chorus_unit_tests
     unit/test_core.cpp
+    unit/test_spsc_ring.cpp
+    unit/test_opus_codec.cpp
+    unit/test_udp_socket.cpp
 )
 
 target_link_libraries(chorus_unit_tests

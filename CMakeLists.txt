@@ -37,6 +37,12 @@ else()
         -Wshadow
         -Wnon-virtual-dtor
     )
+    if(WIN32)
+        target_link_options(chorus_compiler_flags INTERFACE
+            -static-libgcc
+            -static-libstdc++
+        )
+    endif()
 endif()
 
 # Sanitizers configuration
@@ -56,6 +62,36 @@ if(ENABLE_SANITIZERS)
         )
     endif()
 endif()
+
+# -----------------------------------------------------------------------------
+# Third-Party Dependencies (FetchContent)
+# -----------------------------------------------------------------------------
+include(FetchContent)
+
+# 1. libopus
+set(OPUS_BUILD_TESTING OFF CACHE BOOL "" FORCE)
+set(OPUS_BUILD_PROGRAMS OFF CACHE BOOL "" FORCE)
+set(OPUS_BUILD_SHARED_LIBRARY OFF CACHE BOOL "" FORCE)
+set(OPUS_DISABLE_INTRINSICS ON CACHE BOOL "" FORCE)
+
+find_package(Opus CONFIG QUIET)
+if(NOT Opus_FOUND)
+    message(STATUS "Opus not found locally, fetching via FetchContent...")
+    FetchContent_Declare(
+        opus
+        GIT_REPOSITORY https://github.com/xiph/opus.git
+        GIT_TAG        v1.5.2
+    )
+    FetchContent_MakeAvailable(opus)
+endif()
+
+# 2. miniaudio (single header)
+FetchContent_Declare(
+    miniaudio
+    GIT_REPOSITORY https://github.com/mackron/miniaudio.git
+    GIT_TAG        0.11.21
+)
+FetchContent_MakeAvailable(miniaudio)
 
 # -----------------------------------------------------------------------------
 # Subdirectories
