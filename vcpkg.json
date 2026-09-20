@@ -1,0 +1,13 @@
+{
+  "name": "chorus",
+  "version-string": "0.1.0",
+  "description": "Multi-device synchronized low-latency audio sharing for local networks",
+  "homepage": "https://github.com/chorus-audio/chorus",
+  "dependencies": [
+    "catch2",
+    "nlohmann-json",
+    "spdlog",
+    "opus",
+    "miniaudio"
+  ]
+}
