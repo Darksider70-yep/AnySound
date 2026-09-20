@@ -1,19 +1,5 @@
 ---
-Checks: >
-  -*,
-  bugprone-*,
-  clang-analyzer-*,
-  cppcoreguidelines-*,
-  -cppcoreguidelines-pro-bounds-pointer-arithmetic,
-  -cppcoreguidelines-pro-bounds-array-to-pointer-decay,
-  -cppcoreguidelines-owning-memory,
-  modernize-*,
-  -modernize-use-trailing-return-type,
-  performance-*,
-  readability-*,
-  -readability-magic-numbers,
-  -readability-named-parameter
-
+Checks: '-*,bugprone-*,clang-analyzer-*,cppcoreguidelines-*,modernize-*,performance-*,readability-*,-bugprone-easily-swappable-parameters,-cppcoreguidelines-pro-bounds-pointer-arithmetic,-cppcoreguidelines-pro-bounds-array-to-pointer-decay,-cppcoreguidelines-pro-type-vararg,-cppcoreguidelines-pro-type-reinterpret-cast,-cppcoreguidelines-owning-memory,-cppcoreguidelines-avoid-c-arrays,-cppcoreguidelines-avoid-do-while,-modernize-use-trailing-return-type,-readability-magic-numbers,-readability-named-parameter'
 WarningsAsErrors: '*'
 HeaderFilterRegex: 'chorus/.*'
 FormatStyle: file

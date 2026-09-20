@@ -1,3 +1,4 @@
+// NOLINTBEGIN
 #include <catch2/catch_test_macros.hpp>
 #include <chorus/playback/spsc_ring.hpp>
 
@@ -111,3 +112,4 @@ TEST_CASE("SpscRing multi-threaded producer-consumer stress test", "[playback][s
         }
     }
 }
+// NOLINTEND

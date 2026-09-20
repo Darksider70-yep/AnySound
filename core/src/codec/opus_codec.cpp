@@ -45,11 +45,11 @@ bool OpusEncoderWrap::init(int bitrate, int expected_loss_pct) {
     }
 
     // Configure VBR, Bitrate, Complexity, and in-band FEC as specified in architecture.md section 5
-    opus_encoder_ctl(encoder_, OPUS_SET_BITRATE(bitrate));
-    opus_encoder_ctl(encoder_, OPUS_SET_VBR(1));
-    opus_encoder_ctl(encoder_, OPUS_SET_COMPLEXITY(8));
-    opus_encoder_ctl(encoder_, OPUS_SET_INBAND_FEC(1));
-    opus_encoder_ctl(encoder_, OPUS_SET_PACKET_LOSS_PERC(expected_loss_pct));
+    opus_encoder_ctl(encoder_, OPUS_SET_BITRATE(bitrate));                   // NOLINT(cppcoreguidelines-pro-type-vararg)
+    opus_encoder_ctl(encoder_, OPUS_SET_VBR(1));                             // NOLINT(cppcoreguidelines-pro-type-vararg)
+    opus_encoder_ctl(encoder_, OPUS_SET_COMPLEXITY(8));                      // NOLINT(cppcoreguidelines-pro-type-vararg)
+    opus_encoder_ctl(encoder_, OPUS_SET_INBAND_FEC(1));                      // NOLINT(cppcoreguidelines-pro-type-vararg)
+    opus_encoder_ctl(encoder_, OPUS_SET_PACKET_LOSS_PERC(expected_loss_pct)); // NOLINT(cppcoreguidelines-pro-type-vararg)
 
     return true;
 }

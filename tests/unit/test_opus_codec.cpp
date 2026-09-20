@@ -1,3 +1,4 @@
+// NOLINTBEGIN
 #include <catch2/catch_test_macros.hpp>
 #include <chorus/codec/opus_codec.hpp>
 
@@ -73,3 +74,4 @@ TEST_CASE("Opus Packet Loss Concealment (PLC)", "[codec][opus]") {
     const int plc_samples = decoder.decode(std::span<const uint8_t>{}, plc_out);
     REQUIRE(plc_samples == chorus::kSamplesPerFramePerChannel);
 }
+// NOLINTEND

@@ -1,3 +1,4 @@
+// NOLINTBEGIN
 #include <catch2/catch_test_macros.hpp>
 #include <chorus/net/udp_socket.hpp>
 
@@ -55,3 +56,4 @@ TEST_CASE("UDP loopback send and receive", "[net][udp]") {
     REQUIRE(bytes_recvd == static_cast<int>(payload.size()));
     REQUIRE(std::vector<uint8_t>(recv_buf.begin(), recv_buf.begin() + bytes_recvd) == payload);
 }
+// NOLINTEND

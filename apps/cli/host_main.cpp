@@ -4,6 +4,7 @@
 #include <chorus/playback/spsc_ring.hpp>
 #include <chorus/platform/audio_device.hpp>
 
+#include <algorithm>
 #include <atomic>
 #include <chrono>
 #include <cmath>
@@ -31,11 +32,22 @@ constexpr double kTwoPi = 2.0 * std::numbers::pi;
 constexpr float kToneAmplitude = 0.3F;
 constexpr uint32_t kDefaultSessionId = 1;
 
-std::atomic<bool> g_stop_requested{false};
+class HostSignalTracker {
+public:
+    static void initialize() {
+        std::signal(SIGINT, &HostSignalTracker::handle_signal);
+        std::signal(SIGTERM, &HostSignalTracker::handle_signal);
+    }
+    [[nodiscard]] static bool stop_requested() noexcept {
+        return stop_flag_.load(std::memory_order_relaxed);
+    }
 
-void signal_handler(int) {
-    g_stop_requested.store(true);
-}
+private:
+    static void handle_signal(int) {
+        stop_flag_.store(true, std::memory_order_relaxed);
+    }
+    static inline std::atomic<bool> stop_flag_{false};
+};
 
 struct HostConfig {
     std::string target_ip{"127.0.0.1"};
@@ -45,14 +57,14 @@ struct HostConfig {
     bool show_help{false};
 };
 
-HostConfig parse_host_args(int argc, char* argv[]) {
+HostConfig parse_host_args(std::span<char*> args) {
     HostConfig config;
-    for (int i = 1; i < argc; ++i) {
-        const std::string arg = argv[i];
+    for (size_t i = 1; i < args.size(); ++i) {
+        const std::string arg = args[i];
         if (arg == "--test-tone") {
             config.test_tone = true;
-        } else if (arg == "--duration" && (i + 1 < argc)) {
-            config.duration_sec = std::stoi(argv[++i]);
+        } else if (arg == "--duration" && (i + 1 < args.size())) {
+            config.duration_sec = std::stoi(args[++i]);
         } else if (arg == "--help" || arg == "-h") {
             config.show_help = true;
             return config;
@@ -92,17 +104,89 @@ size_t build_audio_packet(std::span<uint8_t> packet_buf,
     chorus::endian::write_u16_be(packet_buf.data() + kAudioHeaderOffsetPayloadLen,
                                  static_cast<uint16_t>(opus_payload.size()));
 
-    std::copy(opus_payload.begin(), opus_payload.end(), packet_buf.begin() + static_cast<ptrdiff_t>(kAudioHeaderSize));
+    std::ranges::copy(opus_payload, packet_buf.begin() + static_cast<ptrdiff_t>(kAudioHeaderSize));
     return kAudioHeaderSize + opus_payload.size();
+}
+
+bool fetch_audio_frame(bool is_test_tone,
+                       chorus::SpscRing<float>& capture_ring,
+                       std::span<float> frame_pcm,
+                       double& tone_phase) {
+    if (is_test_tone) {
+        generate_sine_samples(frame_pcm, tone_phase);
+        std::this_thread::sleep_for(std::chrono::milliseconds(chorus::kFrameDurationMs));
+        return true;
+    }
+
+    if (capture_ring.size() >= static_cast<size_t>(chorus::kFloatsPerFrame)) {
+        const size_t read_floats = capture_ring.read(frame_pcm);
+        return (read_floats == static_cast<size_t>(chorus::kFloatsPerFrame));
+    }
+
+    std::this_thread::sleep_for(std::chrono::milliseconds(2));
+    return false;
+}
+
+void run_host_stream_loop(const HostConfig& config,
+                          bool is_test_tone,
+                          chorus::SpscRing<float>& capture_ring,
+                          chorus::OpusEncoderWrap& encoder,
+                          chorus::UdpSocket& socket) {
+    std::vector<float> frame_pcm(static_cast<size_t>(chorus::kFloatsPerFrame));
+    std::vector<uint8_t> opus_payload(chorus::kMaxOpusPayloadBytes);
+    std::vector<uint8_t> packet_buf(chorus::kMaxUdpPayloadSize);
+
+    const chorus::Endpoint destination{.address = config.target_ip, .port = config.target_port};
+    uint32_t seq = 0;
+    uint64_t total_bytes_sent = 0;
+
+    const auto start_time = std::chrono::steady_clock::now();
+    auto last_stats_time = start_time;
+    uint32_t frames_in_window = 0;
+    double tone_phase = 0.0;
+
+    while (!HostSignalTracker::stop_requested()) {
+        if (config.duration_sec > 0) {
+            const auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(std::chrono::steady_clock::now() - start_time).count();
+            if (elapsed >= config.duration_sec) {
+                break;
+            }
+        }
+
+        if (fetch_audio_frame(is_test_tone, capture_ring, frame_pcm, tone_phase)) {
+            const int payload_bytes = encoder.encode(frame_pcm, opus_payload);
+            if (payload_bytes > 0) {
+                const std::span<const uint8_t> payload_span(opus_payload.data(), static_cast<size_t>(payload_bytes));
+                const size_t packet_len = build_audio_packet(packet_buf, payload_span, kDefaultSessionId, seq++);
+                if (socket.send_to(std::span<const uint8_t>(packet_buf.data(), packet_len), destination)) {
+                    total_bytes_sent += packet_len;
+                    frames_in_window++;
+                }
+            }
+        }
+
+        const auto now = std::chrono::steady_clock::now();
+        if (now - last_stats_time >= std::chrono::seconds(2)) {
+            const double elapsed_s = std::chrono::duration<double>(now - last_stats_time).count();
+            const double fps = static_cast<double>(frames_in_window) / elapsed_s;
+            const double kbps = (static_cast<double>(total_bytes_sent * 8) / 1000.0) / elapsed_s;
+
+            std::cout << "[Host] Sent " << seq << " frames | Rate: " << fps << " fps | Bandwidth: "
+                      << kbps << " kbps\n" << std::flush;
+
+            frames_in_window = 0;
+            total_bytes_sent = 0;
+            last_stats_time = now;
+        }
+    }
 }
 
 }  // namespace
 
 int main(int argc, char* argv[]) {
-    std::signal(SIGINT, signal_handler);
-    std::signal(SIGTERM, signal_handler);
+    HostSignalTracker::initialize();
 
-    const HostConfig config = parse_host_args(argc, argv);
+    const HostConfig config = parse_host_args(std::span<char*>(argv, static_cast<size_t>(argc)));
     if (config.show_help) {
         std::cout << "Usage: chorus_host [client-ip] [client-port] [--test-tone] [--duration <sec>]\n";
         return 0;
@@ -143,69 +227,7 @@ int main(int argc, char* argv[]) {
         }
     }
 
-    std::vector<float> frame_pcm(static_cast<size_t>(chorus::kFloatsPerFrame));
-    std::vector<uint8_t> opus_payload(chorus::kMaxOpusPayloadBytes);
-    std::vector<uint8_t> packet_buf(chorus::kMaxUdpPayloadSize);
-
-    const chorus::Endpoint destination{.address = config.target_ip, .port = config.target_port};
-    uint32_t seq = 0;
-    uint64_t total_bytes_sent = 0;
-
-    const auto start_time = std::chrono::steady_clock::now();
-    auto last_stats_time = start_time;
-    uint32_t frames_in_window = 0;
-    double tone_phase = 0.0;
-
-    while (!g_stop_requested.load()) {
-        if (config.duration_sec > 0) {
-            const auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(std::chrono::steady_clock::now() - start_time).count();
-            if (elapsed >= config.duration_sec) {
-                break;
-            }
-        }
-
-        bool frame_ready = false;
-        if (active_test_tone) {
-            generate_sine_samples(frame_pcm, tone_phase);
-            std::this_thread::sleep_for(std::chrono::milliseconds(chorus::kFrameDurationMs));
-            frame_ready = true;
-        } else {
-            if (capture_ring.size() >= static_cast<size_t>(chorus::kFloatsPerFrame)) {
-                const size_t read_floats = capture_ring.read(frame_pcm);
-                if (read_floats == static_cast<size_t>(chorus::kFloatsPerFrame)) {
-                    frame_ready = true;
-                }
-            } else {
-                std::this_thread::sleep_for(std::chrono::milliseconds(2));
-            }
-        }
-
-        if (frame_ready) {
-            const int payload_bytes = encoder.encode(frame_pcm, opus_payload);
-            if (payload_bytes > 0) {
-                const std::span<const uint8_t> payload_span(opus_payload.data(), static_cast<size_t>(payload_bytes));
-                const size_t packet_len = build_audio_packet(packet_buf, payload_span, kDefaultSessionId, seq++);
-                if (socket.send_to(std::span<const uint8_t>(packet_buf.data(), packet_len), destination)) {
-                    total_bytes_sent += packet_len;
-                    frames_in_window++;
-                }
-            }
-        }
-
-        const auto now = std::chrono::steady_clock::now();
-        if (now - last_stats_time >= std::chrono::seconds(2)) {
-            const double elapsed_s = std::chrono::duration<double>(now - last_stats_time).count();
-            const double fps = static_cast<double>(frames_in_window) / elapsed_s;
-            const double kbps = (static_cast<double>(total_bytes_sent * 8) / 1000.0) / elapsed_s;
-
-            std::cout << "[Host] Sent " << seq << " frames | Rate: " << fps << " fps | Bandwidth: "
-                      << kbps << " kbps\n" << std::flush;
-
-            frames_in_window = 0;
-            total_bytes_sent = 0;
-            last_stats_time = now;
-        }
-    }
+    run_host_stream_loop(config, active_test_tone, capture_ring, encoder, socket);
 
     std::cout << "\nStopping Chorus Host...\n" << std::flush;
     capture_device.stop();
