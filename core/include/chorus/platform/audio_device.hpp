@@ -7,6 +7,7 @@
 #include <memory>
 
 namespace chorus {
+class TimelineBuffer;
 
 /// @brief Audio capture device wrapping miniaudio WASAPI loopback capture.
 /// Reads system audio output and pushes PCM float samples into an SPSC ring buffer.
@@ -50,9 +51,13 @@ public:
     AudioPlaybackDevice(AudioPlaybackDevice&& other) noexcept;
     AudioPlaybackDevice& operator=(AudioPlaybackDevice&& other) noexcept;
 
-    /// @brief Starts audio playback.
+    /// @brief Starts audio playback from an SPSC ring buffer.
     /// @param ring Source lock-free ring buffer providing audio floats.
     [[nodiscard]] bool start_playback(SpscRing<float>* ring);
+
+    /// @brief Starts audio playback from a scheduled TimelineBuffer.
+    /// @param timeline Scheduled timeline buffer providing audio floats at target timestamps.
+    [[nodiscard]] bool start_playback(TimelineBuffer* timeline);
 
     /// @brief Stops audio playback.
     void stop();

@@ -1,176 +1,151 @@
-#include <chorus/codec/opus_codec.hpp>
+#include <chorus/app/app_controller.hpp>
 #include <chorus/core.hpp>
-#include <chorus/net/udp_socket.hpp>
-#include <chorus/playback/spsc_ring.hpp>
-#include <chorus/platform/audio_device.hpp>
 
 #include <atomic>
 #include <chrono>
 #include <csignal>
+#include <iomanip>
 #include <iostream>
+#include <span>
 #include <string>
+#include <thread>
 #include <vector>
 
 namespace {
 
-constexpr int kDefaultRecvTimeoutMs = 100;
-constexpr size_t kAudioHeaderSize = 23;
-constexpr size_t kAudioHeaderOffsetMagic = 0;
-constexpr size_t kAudioHeaderOffsetVersion = 2;
-constexpr size_t kAudioHeaderOffsetType = 3;
-constexpr size_t kAudioHeaderOffsetPayloadLen = 21;
-constexpr size_t kPrebufferFrameCount = 15;
+class ClientSignalTracker {
+public:
+    static void initialize() {
+        std::signal(SIGINT, &ClientSignalTracker::handle_signal);
+        std::signal(SIGTERM, &ClientSignalTracker::handle_signal);
+    }
+    [[nodiscard]] static bool stop_requested() noexcept {
+        return stop_flag_.load(std::memory_order_relaxed);
+    }
 
-std::atomic<bool> g_stop_requested{false};
-
-void signal_handler(int) {
-    g_stop_requested.store(true);
-}
+private:
+    static void handle_signal(int) {
+        stop_flag_.store(true, std::memory_order_relaxed);
+    }
+    static inline std::atomic<bool> stop_flag_{false};
+};
 
 struct ClientConfig {
-    uint16_t listen_port{chorus::kDefaultUdpDataPort};
+    std::string host_ip{"127.0.0.1"};
+    uint16_t tcp_port{chorus::kDefaultTcpControlPort};
+    std::string pin{"0000"};
+    bool scan_only{false};
     int duration_sec{0};
     bool show_help{false};
 };
 
-ClientConfig parse_client_args(int argc, char* argv[]) {
+ClientConfig parse_client_args(std::span<char*> args) {
     ClientConfig config;
-    for (int i = 1; i < argc; ++i) {
-        const std::string arg = argv[i];
-        if (arg == "--duration" && (i + 1 < argc)) {
-            config.duration_sec = std::stoi(argv[++i]);
+    for (size_t i = 1; i < args.size(); ++i) {
+        const std::string arg = args[i];
+        if (arg == "--duration" && (i + 1 < args.size())) {
+            config.duration_sec = std::stoi(args[++i]);
+        } else if (arg == "--pin" && (i + 1 < args.size())) {
+            config.pin = args[++i];
+        } else if (arg == "--tcp-port" && (i + 1 < args.size())) {
+            config.tcp_port = static_cast<uint16_t>(std::stoi(args[++i]));
+        } else if (arg == "--scan") {
+            config.scan_only = true;
         } else if (arg == "--help" || arg == "-h") {
             config.show_help = true;
             return config;
-        } else if (i == 1 && arg[0] != '-') {
-            config.listen_port = static_cast<uint16_t>(std::stoi(arg));
+        } else if (arg[0] != '-') {
+            config.host_ip = arg;
         }
     }
     return config;
 }
 
-bool validate_and_decode_packet(std::span<const uint8_t> packet_data,
-                                chorus::OpusDecoderWrap& decoder,
-                                std::span<float> pcm_decoded) {
-    if (packet_data.size() < kAudioHeaderSize) {
-        return false;
-    }
-
-    const uint16_t magic = chorus::endian::read_u16_be(packet_data.data() + kAudioHeaderOffsetMagic);
-    const uint8_t version = packet_data[kAudioHeaderOffsetVersion];
-    const uint8_t type = packet_data[kAudioHeaderOffsetType];
-
-    if (magic != chorus::kPacketMagic || version != chorus::kProtocolVersion ||
-        type != static_cast<uint8_t>(chorus::PacketType::Audio)) {
-        return false;
-    }
-
-    const uint16_t payload_len = chorus::endian::read_u16_be(packet_data.data() + kAudioHeaderOffsetPayloadLen);
-    if ((kAudioHeaderSize + static_cast<size_t>(payload_len)) > packet_data.size()) {
-        return false;
-    }
-
-    const std::span<const uint8_t> opus_payload(packet_data.data() + kAudioHeaderSize, payload_len);
-    const int samples = decoder.decode(opus_payload, pcm_decoded);
-    return (samples == chorus::kSamplesPerFramePerChannel);
-}
-
 }  // namespace
 
 int main(int argc, char* argv[]) {
-    std::signal(SIGINT, signal_handler);
-    std::signal(SIGTERM, signal_handler);
+    ClientSignalTracker::initialize();
 
-    const ClientConfig config = parse_client_args(argc, argv);
+    const ClientConfig config = parse_client_args(std::span<char*>(argv, static_cast<size_t>(argc)));
     if (config.show_help) {
-        std::cout << "Usage: chorus_client [listen-port] [--duration <sec>]\n";
+        std::cout << "Usage: chorus_client [host-ip] [--pin <pin>] [--tcp-port <port>] [--scan] [--duration <sec>]\n";
         return 0;
     }
 
     std::cout << "========================================\n";
-    std::cout << "Chorus Client Audio Receiver (Phase 1)\n";
-    std::cout << "Listening on UDP port: " << config.listen_port << "\n";
+    std::cout << "Chorus Client Audio Receiver (Phase 4 Session & Auth)\n";
+    if (config.scan_only) {
+        std::cout << "Mode: LAN Discovery Scanner\n";
+    } else {
+        std::cout << "Target Host: " << config.host_ip << ":" << config.tcp_port << "\n";
+        std::cout << "PIN: [" << config.pin << "]\n";
+    }
     if (config.duration_sec > 0) {
         std::cout << "Duration: " << config.duration_sec << " seconds\n";
     }
     std::cout << "========================================\n" << std::flush;
 
-    chorus::UdpSocket socket;
-    if (!socket.bind(config.listen_port, "0.0.0.0")) {
-        std::cerr << "Failed to bind UDP socket on port " << config.listen_port << "\n" << std::flush;
+    chorus::AppController app;
+
+    if (config.scan_only) {
+        std::cout << "Scanning for Chorus hosts on LAN for 5 seconds...\n" << std::flush;
+        for (int i = 0; i < 50 && !ClientSignalTracker::stop_requested(); ++i) {
+            app.update();
+            std::this_thread::sleep_for(std::chrono::milliseconds(100));
+        }
+        const auto snap = app.snapshot();
+        std::cout << "Found " << snap.discovered_hosts.size() << " host(s):\n";
+        for (const auto& h : snap.discovered_hosts) {
+            std::cout << " - Host: " << h.name << " @ " << h.address << ":" << h.tcp_port << "\n";
+        }
+        return 0;
+    }
+
+    std::cout << "Connecting to host " << config.host_ip << ":" << config.tcp_port << "...\n" << std::flush;
+    if (!app.join_host(config.host_ip, config.tcp_port, config.pin)) {
+        std::cerr << "Failed to initiate connection to host!\n" << std::flush;
         return 1;
     }
-    if (!socket.set_recv_timeout_ms(kDefaultRecvTimeoutMs)) {
-        std::cerr << "Warning: Failed to set socket recv timeout\n" << std::flush;
-    }
-
-    chorus::OpusDecoderWrap decoder;
-    if (!decoder.init()) {
-        std::cerr << "Failed to initialize Opus decoder.\n" << std::flush;
-        return 1;
-    }
-
-    const size_t ring_capacity = static_cast<size_t>(chorus::kSampleRate) * static_cast<size_t>(chorus::kChannels);
-    chorus::SpscRing<float> playout_ring(ring_capacity);
-    chorus::AudioPlaybackDevice playback_device;
-
-    std::vector<uint8_t> packet_buf(chorus::kMaxUdpPayloadSize);
-    std::vector<float> pcm_decoded(static_cast<size_t>(chorus::kFloatsPerFrame));
-
-    uint64_t packets_received = 0;
-    bool playback_started = false;
-    const size_t prebuffer_target = kPrebufferFrameCount * static_cast<size_t>(chorus::kFloatsPerFrame);
 
     const auto start_time = std::chrono::steady_clock::now();
     auto last_stats_time = start_time;
-    uint32_t packets_in_window = 0;
 
-    std::cout << "Waiting for incoming audio stream...\n" << std::flush;
-
-    while (!g_stop_requested.load()) {
+    while (!ClientSignalTracker::stop_requested()) {
+        const auto now = std::chrono::steady_clock::now();
         if (config.duration_sec > 0) {
-            const auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(std::chrono::steady_clock::now() - start_time).count();
+            const auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(now - start_time).count();
             if (elapsed >= config.duration_sec) {
                 break;
             }
         }
 
-        chorus::Endpoint sender;
-        const int bytes = socket.receive_from(packet_buf, sender);
+        app.update();
 
-        if (bytes > 0) {
-            const std::span<const uint8_t> packet_span(packet_buf.data(), static_cast<size_t>(bytes));
-            if (validate_and_decode_packet(packet_span, decoder, pcm_decoded)) {
-                playout_ring.write(pcm_decoded);
-                packets_received++;
-                packets_in_window++;
-
-                if (!playback_started && (playout_ring.size() >= prebuffer_target)) {
-                    if (playback_device.start_playback(&playout_ring)) {
-                        playback_started = true;
-                        std::cout << "Pre-buffer reached 300 ms. Audio playback active!\n" << std::flush;
-                    }
-                }
-            }
+        const auto snap = app.snapshot();
+        if (snap.role == chorus::AppRole::Idle && !snap.rejection_reason.empty()) {
+            std::cerr << "Rejected by host! Reason: " << snap.rejection_reason << "\n" << std::flush;
+            break;
         }
 
-        const auto now = std::chrono::steady_clock::now();
         if (now - last_stats_time >= std::chrono::seconds(2)) {
-            if (packets_received > 0) {
-                const double elapsed_s = std::chrono::duration<double>(now - last_stats_time).count();
-                const double fps = static_cast<double>(packets_in_window) / elapsed_s;
-                const size_t buffered_ms = (playout_ring.size() * 1000) / (static_cast<size_t>(chorus::kSampleRate) * static_cast<size_t>(chorus::kChannels));
-
-                std::cout << "[Client] Recv " << packets_received << " frames | Rate: " << fps
-                          << " fps | Buffer: " << buffered_ms << " ms | Underruns: "
-                          << playback_device.underruns() << "\n" << std::flush;
-            }
-            packets_in_window = 0;
+            const auto& st = snap.client_stats;
+            std::cout << "[Client] Active: " << (snap.is_active ? "YES" : "NO")
+                      << " | Sync Err: " << (static_cast<double>(st.sync_error_us) / 1000.0) << " ms"
+                      << " | Skew: " << std::fixed << std::setprecision(1) << st.skew_ppm << " ppm"
+                      << " | Buffer: " << st.buffer_ms << " ms"
+                      << " | Underruns: " << st.underruns
+                      << " | Late: " << st.late
+                      << " | Loss: " << std::setprecision(2) << st.loss_pct << "%"
+                      << " | Vol: " << static_cast<int>(snap.volume * 100) << "%"
+                      << (snap.is_muted ? " (MUTED)" : "")
+                      << " | Offset: " << snap.offset_ms << " ms\n" << std::flush;
             last_stats_time = now;
         }
+
+        std::this_thread::sleep_for(std::chrono::milliseconds(5));
     }
 
     std::cout << "\nStopping Chorus Client...\n" << std::flush;
-    playback_device.stop();
+    app.leave_host();
     return 0;
 }

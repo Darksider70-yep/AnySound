@@ -93,6 +93,18 @@ FetchContent_Declare(
 )
 FetchContent_MakeAvailable(miniaudio)
 
+# 3. nlohmann_json
+find_package(nlohmann_json CONFIG QUIET)
+if(NOT nlohmann_json_FOUND)
+    message(STATUS "nlohmann_json not found locally, fetching via FetchContent...")
+    FetchContent_Declare(
+        nlohmann_json
+        GIT_REPOSITORY https://github.com/nlohmann/json.git
+        GIT_TAG        v3.11.3
+    )
+    FetchContent_MakeAvailable(nlohmann_json)
+endif()
+
 # -----------------------------------------------------------------------------
 # Subdirectories
 # -----------------------------------------------------------------------------

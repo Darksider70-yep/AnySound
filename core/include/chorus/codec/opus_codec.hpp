@@ -67,6 +67,13 @@ public:
                              std::span<float> pcm_out,
                              bool decode_fec = false);
 
+    /// @brief Performs Packet Loss Concealment (PLC) synthesis for a lost frame.
+    /// @param pcm_out Output buffer (must have space for at least 1920 floats).
+    /// @return Number of decoded samples per channel (960 on success), or -1 on error.
+    [[nodiscard]] int decode_plc(std::span<float> pcm_out) {
+        return decode({}, pcm_out);
+    }
+
 private:
     OpusDecoder* decoder_{nullptr};
 };

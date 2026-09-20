@@ -3,6 +3,19 @@ add_library(chorus_core STATIC
     src/codec/opus_codec.cpp
     src/net/udp_socket.cpp
     src/platform/audio_device.cpp
+    src/proto/packet.cpp
+    src/sync/clock_estimator.cpp
+    src/sync/jitter_buffer.cpp
+    src/sync/resampler.cpp
+    src/sync/drift_controller.cpp
+    src/playback/timeline_buffer.cpp
+    src/net/control_message.cpp
+    src/net/tcp_socket.cpp
+    src/net/discovery.cpp
+    src/session/pin_authenticator.cpp
+    src/session/host_session.cpp
+    src/session/client_session.cpp
+    src/app/app_controller.cpp
 )
 
 target_include_directories(chorus_core
@@ -18,6 +31,7 @@ target_include_directories(chorus_core
 target_link_libraries(chorus_core
     PUBLIC
         chorus_compiler_flags
+        nlohmann_json::nlohmann_json
     PRIVATE
         Opus::opus
 )

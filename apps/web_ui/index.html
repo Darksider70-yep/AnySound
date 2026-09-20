@@ -1,0 +1,927 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Chorus — Multi-Device Synchronized LAN Audio</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Manrope:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      /* Dark Theme (Default) */
+      --harbor: #0F1E27;
+      --deck: #16303C;
+      --line: #21414F;
+      --fog: #E6EEF2;
+      --mist: #8FA6B2;
+      --sonar: #4FD8E8;
+      --drift: #F2B04C;
+      --lost: #F0625D;
+      --text-on-sonar: #0F1E27;
+
+      --sans: 'Manrope', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      --serif: 'Instrument Serif', Georgia, serif;
+      --radius-sm: 4px;
+      --radius-lg: 12px;
+      --radius-full: 9999px;
+    }
+
+    body.light-theme {
+      --harbor: #EEF3F6;
+      --deck: #FFFFFF;
+      --line: #CBD8DF;
+      --fog: #0F1E27;
+      --mist: #4A6472;
+      --sonar: #0A7A8C;
+      --drift: #9A5B00;
+      --lost: #C7362F;
+      --text-on-sonar: #FFFFFF;
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    body {
+      background-color: var(--harbor);
+      color: var(--fog);
+      font-family: var(--sans);
+      font-size: 16px;
+      line-height: 1.5;
+      font-variant-numeric: tabular-nums;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      overflow-x: hidden;
+      transition: background-color 0.2s ease, color 0.2s ease;
+    }
+
+    /* Focus Ring */
+    *:focus-visible {
+      outline: 2px solid var(--sonar);
+      outline-offset: 2px;
+    }
+
+    /* Container App Window */
+    #app-container {
+      width: 100%;
+      max-width: 1080px;
+      margin: 24px auto;
+      min-height: 640px;
+      background: var(--deck);
+      border: 1px solid var(--line);
+      border-radius: var(--radius-lg);
+      display: flex;
+      flex-direction: column;
+      position: relative;
+      box-shadow: 0 8px 32px rgba(0, 0, 0, 0.2);
+    }
+
+    header.app-header {
+      padding: 16px 24px;
+      border-bottom: 1px solid var(--line);
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      background: var(--deck);
+      border-top-left-radius: var(--radius-lg);
+      border-top-right-radius: var(--radius-lg);
+    }
+
+    .brand-title {
+      font-family: var(--serif);
+      font-size: 28px;
+      color: var(--fog);
+      font-weight: normal;
+    }
+
+    .header-actions {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    /* Buttons */
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      padding: 10px 20px;
+      font-family: var(--sans);
+      font-size: 15px;
+      font-weight: 600;
+      border-radius: var(--radius-lg);
+      cursor: pointer;
+      border: none;
+      transition: all 0.15s ease;
+      text-decoration: none;
+    }
+
+    .btn-primary {
+      background: var(--sonar);
+      color: var(--text-on-sonar);
+    }
+    .btn-primary:hover {
+      filter: brightness(1.1);
+    }
+
+    .btn-secondary {
+      background: var(--deck);
+      color: var(--fog);
+      border: 1px solid var(--line);
+    }
+    .btn-secondary:hover {
+      background: var(--line);
+    }
+
+    .btn-sm {
+      padding: 6px 14px;
+      font-size: 13px;
+      border-radius: var(--radius-sm);
+    }
+
+    /* View Sections */
+    .view-section {
+      display: none;
+      flex: 1;
+      padding: 32px 24px;
+    }
+    .view-section.active {
+      display: flex;
+      flex-direction: column;
+    }
+
+    /* Home View */
+    .home-view {
+      align-items: center;
+      justify-content: center;
+      text-align: center;
+      gap: 40px;
+      padding: 64px 24px;
+    }
+
+    .hero-heading {
+      font-family: var(--serif);
+      font-size: 48px;
+      color: var(--fog);
+      margin-bottom: 8px;
+    }
+
+    .hero-subheading {
+      color: var(--mist);
+      font-size: 18px;
+    }
+
+    .cards-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 24px;
+      width: 100%;
+      max-width: 720px;
+    }
+
+    .action-card {
+      background: var(--harbor);
+      border: 1px solid var(--line);
+      border-radius: var(--radius-lg);
+      padding: 36px 24px;
+      cursor: pointer;
+      transition: all 0.2s ease;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 12px;
+    }
+    .action-card:hover {
+      border-color: var(--sonar);
+      background: var(--deck);
+      transform: translateY(-2px);
+    }
+
+    .action-card .icon {
+      font-size: 36px;
+    }
+    .action-card h3 {
+      font-size: 18px;
+      font-weight: 600;
+      color: var(--fog);
+    }
+    .action-card p {
+      font-size: 13px;
+      color: var(--mist);
+    }
+
+    /* Host View */
+    .host-view {
+      padding: 0;
+    }
+
+    .host-header-bar {
+      padding: 16px 24px;
+      border-bottom: 1px solid var(--line);
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      background: var(--deck);
+    }
+
+    .pin-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 10px;
+      background: var(--harbor);
+      border: 1px solid var(--sonar);
+      border-radius: var(--radius-sm);
+      padding: 4px 12px;
+      font-size: 20px;
+      font-weight: 700;
+      letter-spacing: 2px;
+      color: var(--sonar);
+    }
+
+    .speaker-notice {
+      background: rgba(242, 176, 76, 0.15);
+      border-bottom: 1px solid var(--drift);
+      padding: 10px 24px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      font-size: 13px;
+      color: var(--fog);
+    }
+
+    .host-main-grid {
+      display: grid;
+      grid-template-columns: 1fr 380px;
+      flex: 1;
+      min-height: 420px;
+    }
+
+    .room-view-col {
+      background: var(--harbor);
+      position: relative;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      overflow: hidden;
+      border-right: 1px solid var(--line);
+    }
+
+    #sonar-canvas {
+      width: 100%;
+      height: 100%;
+      min-height: 380px;
+    }
+
+    .devices-col {
+      background: var(--deck);
+      display: flex;
+      flex-direction: column;
+    }
+
+    .devices-header {
+      padding: 14px 20px;
+      font-size: 14px;
+      font-weight: 600;
+      color: var(--fog);
+      border-bottom: 1px solid var(--line);
+    }
+
+    .devices-list {
+      flex: 1;
+      overflow-y: auto;
+      list-style: none;
+    }
+
+    .device-row {
+      padding: 16px 20px;
+      border-bottom: 1px solid var(--line);
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+
+    .device-row-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    .device-name {
+      font-weight: 600;
+      font-size: 15px;
+      color: var(--fog);
+    }
+
+    .sync-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 13px;
+    }
+
+    .sync-dot {
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+    }
+    .sync-dot.tight {
+      background: var(--sonar);
+    }
+    .sync-dot.drifting {
+      background: var(--drift);
+    }
+    .sync-dot.out {
+      background: var(--lost);
+    }
+
+    .device-controls-row {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .slider-track {
+      flex: 1;
+      -webkit-appearance: none;
+      appearance: none;
+      height: 4px;
+      background: var(--line);
+      border-radius: 2px;
+      outline: none;
+    }
+    .slider-track::-webkit-slider-thumb {
+      -webkit-appearance: none;
+      appearance: none;
+      width: 18px;
+      height: 18px;
+      border-radius: 50%;
+      background: var(--fog);
+      cursor: pointer;
+      border: 2px solid var(--harbor);
+    }
+
+    .stepper {
+      display: inline-flex;
+      align-items: center;
+      border: 1px solid var(--line);
+      border-radius: var(--radius-sm);
+      background: var(--deck);
+    }
+    .stepper button {
+      background: transparent;
+      border: none;
+      color: var(--fog);
+      width: 28px;
+      height: 28px;
+      font-size: 16px;
+      cursor: pointer;
+    }
+    .stepper button:hover {
+      background: var(--line);
+    }
+    .stepper span {
+      padding: 0 8px;
+      font-size: 13px;
+      min-width: 50px;
+      text-align: center;
+    }
+
+    .host-bottom-bar {
+      padding: 14px 24px;
+      border-top: 1px solid var(--line);
+      background: var(--deck);
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      border-bottom-left-radius: var(--radius-lg);
+      border-bottom-right-radius: var(--radius-lg);
+    }
+
+    /* Client Listening View */
+    .client-listening-view {
+      align-items: center;
+      justify-content: center;
+      gap: 32px;
+      max-width: 520px;
+      margin: 0 auto;
+    }
+
+    .hero-sync-card {
+      width: 100%;
+      background: var(--harbor);
+      border: 1px solid var(--line);
+      border-radius: var(--radius-lg);
+      padding: 36px 24px;
+      text-align: center;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .hero-sync-readout {
+      font-family: var(--serif);
+      font-size: 56px;
+      color: var(--sonar);
+      line-height: 1;
+    }
+
+    /* Modal */
+    .modal-backdrop {
+      position: fixed;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      background: rgba(15, 30, 39, 0.8);
+      display: none;
+      align-items: center;
+      justify-content: center;
+      z-index: 1000;
+    }
+    .modal-backdrop.active {
+      display: flex;
+    }
+
+    .modal-dialog {
+      background: var(--deck);
+      border: 1px solid var(--line);
+      border-radius: var(--radius-lg);
+      padding: 28px;
+      width: 100%;
+      max-width: 400px;
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+    }
+
+    .pin-input {
+      width: 100%;
+      height: 52px;
+      background: var(--harbor);
+      border: 1px solid var(--line);
+      border-radius: var(--radius-sm);
+      color: var(--fog);
+      font-family: var(--sans);
+      font-size: 24px;
+      font-weight: 700;
+      letter-spacing: 8px;
+      text-align: center;
+    }
+  </style>
+</head>
+<body>
+  <div id="app-container">
+    <header class="app-header">
+      <h1 class="brand-title">Chorus</h1>
+      <div class="header-actions">
+        <button id="theme-toggle" class="btn btn-secondary btn-sm">Theme: Dark</button>
+        <button id="settings-btn" class="btn btn-secondary btn-sm">Settings</button>
+      </div>
+    </header>
+
+    <!-- View: Home -->
+    <section id="view-home" class="view-section home-view active">
+      <div>
+        <h2 class="hero-heading">Make every device a speaker.</h2>
+        <p class="hero-subheading">Ultra low-latency synchronized audio sharing over local Wi-Fi / LAN.</p>
+      </div>
+
+      <div class="cards-grid">
+        <div id="card-share" class="action-card">
+          <div class="icon">📻</div>
+          <h3>Share this device's sound</h3>
+          <p>Stream system loopback audio to nearby phones and laptops</p>
+        </div>
+        <div id="card-join" class="action-card">
+          <div class="icon">🎧</div>
+          <h3>Play sound from another device</h3>
+          <p>Discover hosts on LAN and listen in microsecond sync</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- View: Host -->
+    <section id="view-host" class="view-section host-view">
+      <div class="host-header-bar">
+        <h2 class="brand-title" style="font-size: 22px;">Sharing this computer's sound</h2>
+        <div style="display: flex; align-items: center; gap: 12px;">
+          <span style="color: var(--mist); font-size: 14px;">Code</span>
+          <span id="host-pin-display" class="pin-badge">4821</span>
+        </div>
+      </div>
+
+      <div class="speaker-notice" id="host-speaker-notice">
+        <span>ℹ This computer's own speakers should be off while sharing, or they'll play ahead of the others.</span>
+        <button class="btn btn-secondary btn-sm" onclick="document.getElementById('host-speaker-notice').style.display='none'">Got it</button>
+      </div>
+
+      <div class="host-main-grid">
+        <!-- Room View -->
+        <div class="room-view-col">
+          <canvas id="sonar-canvas"></canvas>
+          <div style="position: absolute; bottom: 16px; color: var(--mist); font-size: 13px;">Room view (Sonar Rings encode sync status)</div>
+        </div>
+
+        <!-- Devices List -->
+        <div class="devices-col">
+          <div class="devices-header" id="devices-count-header">Listening devices (2)</div>
+          <ul class="devices-list" id="host-devices-list">
+            <!-- Rendered by JS -->
+          </ul>
+        </div>
+      </div>
+
+      <div class="host-bottom-bar">
+        <div style="display: flex; align-items: center; gap: 12px;">
+          <span style="color: var(--mist); font-size: 14px;">Master Volume</span>
+          <input type="range" class="slider-track" min="0" max="100" value="100" style="width: 120px;">
+        </div>
+
+        <div style="display: flex; align-items: center; gap: 12px;">
+          <span style="color: var(--mist); font-size: 14px;">Delay between devices</span>
+          <div class="stepper">
+            <button onclick="adjustTargetLatency(-20)">−</button>
+            <span id="target-latency-val">300 ms</span>
+            <button onclick="adjustTargetLatency(+20)">+</button>
+          </div>
+        </div>
+
+        <button class="btn btn-secondary btn-sm" onclick="stopHosting()">Stop sharing</button>
+      </div>
+    </section>
+
+    <!-- View: Client Find -->
+    <section id="view-client-find" class="view-section" style="max-width: 600px; margin: 0 auto; gap: 20px;">
+      <div style="display: flex; justify-content: space-between; align-items: center;">
+        <h2 class="brand-title" style="font-size: 24px;">Nearby Hosts</h2>
+        <button class="btn btn-secondary btn-sm" onclick="showView('home')">Back</button>
+      </div>
+
+      <div style="background: var(--harbor); border: 1px solid var(--line); border-radius: var(--radius-lg); padding: 16px;">
+        <div id="nearby-hosts-list" style="display: flex; flex-direction: column; gap: 12px;">
+          <!-- Nearby Hosts Rendered by JS -->
+        </div>
+      </div>
+
+      <div style="display: flex; justify-content: space-between; align-items: center;">
+        <span style="color: var(--mist); font-size: 14px;">Not listed?</span>
+        <button class="btn btn-secondary btn-sm" onclick="openPinModal('127.0.0.1', 47800, 'Manual Host')">Enter address manually</button>
+      </div>
+    </section>
+
+    <!-- View: Client Listening -->
+    <section id="view-client-listening" class="view-section client-listening-view">
+      <h2 id="client-host-title" class="brand-title" style="font-size: 24px;">Listening to Daksh's Laptop</h2>
+
+      <div class="hero-sync-card">
+        <div id="hero-sync-val" class="hero-sync-readout">±2 ms</div>
+        <div class="sync-badge">
+          <span class="sync-dot tight"></span>
+          <span id="hero-sync-label" style="font-weight: 600; color: var(--sonar);">In sync</span>
+        </div>
+      </div>
+
+      <div style="width: 100%; background: var(--harbor); border: 1px solid var(--line); border-radius: var(--radius-lg); padding: 20px; display: flex; flex-direction: column; gap: 16px;">
+        <div style="display: flex; align-items: center; justify-content: space-between;">
+          <span style="color: var(--fog); font-size: 14px;">Volume</span>
+          <input type="range" class="slider-track" min="0" max="100" value="90" style="max-width: 260px;">
+        </div>
+
+        <div style="height: 1px; background: var(--line);"></div>
+
+        <div style="display: flex; align-items: center; justify-content: space-between;">
+          <span style="color: var(--fog); font-size: 14px;">Delay</span>
+          <div class="stepper">
+            <button onclick="adjustClientDelay(-1)">−</button>
+            <span id="client-delay-val">0 ms</span>
+            <button onclick="adjustClientDelay(+1)">+</button>
+          </div>
+          <button class="btn btn-secondary btn-sm" onclick="showView('calibrate')">Fine-tune</button>
+        </div>
+      </div>
+
+      <button class="btn btn-secondary" onclick="leaveSession()">Leave</button>
+    </section>
+
+    <!-- View: Calibrate -->
+    <section id="view-calibrate" class="view-section" style="max-width: 540px; margin: 0 auto; gap: 24px;">
+      <div style="display: flex; justify-content: space-between; align-items: center;">
+        <h2 class="brand-title" style="font-size: 24px;">Fine-tune Delay</h2>
+        <button class="btn btn-secondary btn-sm" onclick="showView('client-listening')">Done</button>
+      </div>
+
+      <div style="background: var(--harbor); border: 1px solid var(--line); border-radius: var(--radius-lg); padding: 16px; color: var(--mist); font-size: 14px;">
+        Both devices will play a short click together. Adjust delay until you hear one unified click.
+      </div>
+
+      <div style="background: var(--harbor); border: 1px solid var(--line); border-radius: var(--radius-lg); padding: 28px; display: flex; flex-direction: column; align-items: center; gap: 20px;">
+        <div id="calib-readout" class="hero-sync-readout" style="font-size: 48px;">+0 ms</div>
+        <input type="range" id="calib-slider" class="slider-track" min="-500" max="500" value="0" style="width: 100%;" oninput="onCalibSlider(this.value)">
+
+        <div style="display: flex; gap: 8px;">
+          <button class="btn btn-secondary btn-sm" onclick="stepCalib(-10)">−10 ms</button>
+          <button class="btn btn-secondary btn-sm" onclick="stepCalib(-1)">−1 ms</button>
+          <button class="btn btn-secondary btn-sm" onclick="stepCalib(+1)">+1 ms</button>
+          <button class="btn btn-secondary btn-sm" onclick="stepCalib(+10)">+10 ms</button>
+        </div>
+      </div>
+
+      <div style="display: flex; gap: 12px;">
+        <button class="btn btn-secondary" style="flex: 1;" onclick="toggleTestClicks(this)">Play test clicks</button>
+        <button class="btn btn-primary" style="flex: 1;" onclick="saveCalibration()">Save offset</button>
+      </div>
+    </section>
+
+    <!-- View: Settings -->
+    <section id="view-settings" class="view-section" style="max-width: 560px; margin: 0 auto; gap: 24px;">
+      <div style="display: flex; justify-content: space-between; align-items: center;">
+        <h2 class="brand-title" style="font-size: 24px;">Settings</h2>
+        <button class="btn btn-secondary btn-sm" onclick="showView('home')">Done</button>
+      </div>
+
+      <div style="background: var(--harbor); border: 1px solid var(--line); border-radius: var(--radius-lg); padding: 20px; display: flex; flex-direction: column; gap: 20px;">
+        <div style="display: flex; justify-content: space-between; align-items: center;">
+          <span>Theme Mode</span>
+          <button class="btn btn-secondary btn-sm" onclick="toggleTheme()">Toggle Dark / Light</button>
+        </div>
+        <div style="height: 1px; background: var(--line);"></div>
+        <div style="display: flex; justify-content: space-between; align-items: center;">
+          <div>
+            <div>Reduced motion</div>
+            <div style="font-size: 12px; color: var(--mist);">Replaces pulsing waves with static indicators</div>
+          </div>
+          <input type="checkbox" id="reduced-motion-check" onchange="toggleReducedMotion(this.checked)">
+        </div>
+        <div style="height: 1px; background: var(--line);"></div>
+        <div>
+          <div style="font-weight: 600; margin-bottom: 4px;">Network Ports</div>
+          <div style="font-size: 13px; color: var(--mist);">TCP Control: 47800 | UDP Audio: 47801 | Discovery: 47803</div>
+        </div>
+      </div>
+    </section>
+  </div>
+
+  <!-- PIN Modal -->
+  <div id="pin-modal" class="modal-backdrop">
+    <div class="modal-dialog">
+      <h3 class="brand-title" style="font-size: 22px;">Enter 4-Digit Code</h3>
+      <p style="font-size: 13px; color: var(--mist);">Enter the 4-digit PIN displayed on the sharing host</p>
+      <input type="text" id="modal-pin-input" class="pin-input" maxlength="4" placeholder="0000" autofocus>
+      <div style="display: flex; gap: 12px; margin-top: 8px;">
+        <button class="btn btn-secondary" style="flex: 1;" onclick="closePinModal()">Cancel</button>
+        <button class="btn btn-primary" style="flex: 1;" onclick="submitPin()">Connect</button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    // State
+    const state = {
+      role: 'home',
+      pin: '4821',
+      targetLatencyMs: 300,
+      clientDelayMs: 0,
+      theme: 'dark',
+      reducedMotion: false,
+      clients: [
+        { id: 1, name: "Priya's laptop", platform: "Windows", syncErrorMs: 2.1, syncState: "tight", volume: 0.9, isMuted: false, offsetMs: 0 },
+        { id: 2, name: "Pixel 8", platform: "Android", syncErrorMs: 11.4, syncState: "drifting", volume: 0.8, isMuted: false, offsetMs: 8 }
+      ],
+      discoveredHosts: [
+        { name: "Daksh's Laptop", address: "192.168.1.105", tcpPort: 47800 },
+        { name: "Living Room Mac", address: "192.168.1.112", tcpPort: 47800 }
+      ]
+    };
+
+    function showView(viewName) {
+      document.querySelectorAll('.view-section').forEach(el => el.classList.remove('active'));
+      const target = document.getElementById('view-' + viewName);
+      if (target) target.classList.add('active');
+      state.role = viewName;
+      if (viewName === 'host') renderHostDevices();
+      if (viewName === 'client-find') renderNearbyHosts();
+    }
+
+    document.getElementById('card-share').onclick = () => showView('host');
+    document.getElementById('card-join').onclick = () => showView('client-find');
+    document.getElementById('settings-btn').onclick = () => showView('settings');
+
+    function stopHosting() { showView('home'); }
+    function leaveSession() { showView('home'); }
+
+    function renderHostDevices() {
+      const list = document.getElementById('host-devices-list');
+      list.innerHTML = '';
+      document.getElementById('devices-count-header').textContent = `Listening devices (${state.clients.length})`;
+
+      state.clients.forEach(dev => {
+        const li = document.createElement('li');
+        li.className = 'device-row';
+        const dotClass = dev.syncState;
+        const sign = dev.offsetMs >= 0 ? '+' : '';
+        li.innerHTML = `
+          <div class="device-row-header">
+            <span class="device-name">${dev.name}</span>
+            <div class="sync-badge">
+              <span class="sync-dot ${dotClass}"></span>
+              <span style="color: ${dotClass === 'tight' ? 'var(--sonar)' : (dotClass === 'drifting' ? 'var(--drift)' : 'var(--lost)')}">
+                ${dotClass === 'tight' ? 'In sync' : 'Drifting'}
+              </span>
+              <span style="color: var(--mist);">±${Math.abs(Math.round(dev.syncErrorMs))} ms</span>
+            </div>
+          </div>
+          <div class="device-controls-row">
+            <span style="font-size: 12px; color: var(--mist); min-width: 44px;">Volume</span>
+            <input type="range" class="slider-track" min="0" max="100" value="${dev.volume * 100}">
+            <div class="stepper">
+              <button onclick="adjustDevOffset(${dev.id}, -1)">−</button>
+              <span>Delay ${sign}${dev.offsetMs}</span>
+              <button onclick="adjustDevOffset(${dev.id}, +1)">+</button>
+            </div>
+          </div>
+        `;
+        list.appendChild(li);
+      });
+    }
+
+    function renderNearbyHosts() {
+      const list = document.getElementById('nearby-hosts-list');
+      list.innerHTML = '';
+      state.discoveredHosts.forEach(h => {
+        const div = document.createElement('div');
+        div.style.display = 'flex';
+        div.style.justifyContent = 'space-between';
+        div.style.alignItems = 'center';
+        div.style.padding = '10px 14px';
+        div.style.background = 'var(--deck)';
+        div.style.borderRadius = 'var(--radius-sm)';
+        div.innerHTML = `
+          <div>
+            <div style="font-weight: 600; font-size: 15px;">${h.name}</div>
+            <div style="font-size: 12px; color: var(--mist);">${h.address}:${h.tcpPort}</div>
+          </div>
+          <button class="btn btn-primary btn-sm" onclick="openPinModal('${h.address}', ${h.tcpPort}, '${h.name}')">Join</button>
+        `;
+        list.appendChild(div);
+      });
+    }
+
+    function adjustDevOffset(devId, delta) {
+      const dev = state.clients.find(c => c.id === devId);
+      if (dev) {
+        dev.offsetMs += delta;
+        renderHostDevices();
+      }
+    }
+
+    function adjustTargetLatency(delta) {
+      state.targetLatencyMs = Math.max(100, Math.min(1000, state.targetLatencyMs + delta));
+      document.getElementById('target-latency-val').textContent = state.targetLatencyMs + ' ms';
+    }
+
+    function adjustClientDelay(delta) {
+      state.clientDelayMs += delta;
+      const sign = state.clientDelayMs >= 0 ? '+' : '';
+      document.getElementById('client-delay-val').textContent = sign + state.clientDelayMs + ' ms';
+      document.getElementById('calib-readout').textContent = sign + state.clientDelayMs + ' ms';
+    }
+
+    function onCalibSlider(val) {
+      state.clientDelayMs = parseInt(val, 10);
+      const sign = state.clientDelayMs >= 0 ? '+' : '';
+      document.getElementById('calib-readout').textContent = sign + state.clientDelayMs + ' ms';
+      document.getElementById('client-delay-val').textContent = sign + state.clientDelayMs + ' ms';
+    }
+
+    function stepCalib(step) {
+      state.clientDelayMs = Math.max(-500, Math.min(500, state.clientDelayMs + step));
+      document.getElementById('calib-slider').value = state.clientDelayMs;
+      onCalibSlider(state.clientDelayMs);
+    }
+
+    function saveCalibration() {
+      showView('client-listening');
+    }
+
+    function toggleTestClicks(btn) {
+      if (btn.textContent.includes('Play')) {
+        btn.textContent = 'Stop test clicks';
+      } else {
+        btn.textContent = 'Play test clicks';
+      }
+    }
+
+    // Modal
+    let targetHostForPin = null;
+    function openPinModal(ip, port, name) {
+      targetHostForPin = { ip, port, name };
+      document.getElementById('pin-modal').classList.add('active');
+      const input = document.getElementById('modal-pin-input');
+      input.value = '';
+      input.focus();
+    }
+    function closePinModal() {
+      document.getElementById('pin-modal').classList.remove('active');
+    }
+    function submitPin() {
+      const pin = document.getElementById('modal-pin-input').value;
+      closePinModal();
+      document.getElementById('client-host-title').textContent = 'Listening to ' + (targetHostForPin ? targetHostForPin.name : 'Host');
+      showView('client-listening');
+    }
+
+    // Theme Switcher
+    function toggleTheme() {
+      state.theme = state.theme === 'dark' ? 'light' : 'dark';
+      document.body.className = state.theme === 'light' ? 'light-theme' : '';
+      document.getElementById('theme-toggle').textContent = `Theme: ${state.theme === 'light' ? 'Light' : 'Dark'}`;
+    }
+    document.getElementById('theme-toggle').onclick = toggleTheme;
+
+    function toggleReducedMotion(checked) {
+      state.reducedMotion = checked;
+    }
+
+    // Sonar Wave Canvas Animation
+    const canvas = document.getElementById('sonar-canvas');
+    const ctx = canvas.getContext('2d');
+    let masterPhase = 0;
+
+    function resizeCanvas() {
+      canvas.width = canvas.parentElement.clientWidth;
+      canvas.height = canvas.parentElement.clientHeight;
+    }
+    window.addEventListener('resize', resizeCanvas);
+    resizeCanvas();
+
+    function drawSonar() {
+      if (state.role === 'host') {
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        const cx = canvas.width / 2;
+        const cy = canvas.height / 2;
+
+        masterPhase = (masterPhase + 0.015) % 1.0;
+
+        // Sonar grid circle
+        ctx.strokeStyle = getComputedStyle(document.body).getPropertyValue('--line');
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.arc(cx, cy, Math.min(cx, cy) * 0.75, 0, 2 * Math.PI);
+        ctx.stroke();
+
+        // Host Node at center
+        drawNode(cx, cy, "This Host", getComputedStyle(document.body).getPropertyValue('--sonar'), 0, true);
+
+        // Orbiting devices
+        const count = state.clients.length;
+        const radius = Math.min(cx, cy) * 0.55;
+        state.clients.forEach((dev, idx) => {
+          const angle = (2 * Math.PI * idx / count) - (Math.PI / 2);
+          const dx = cx + Math.cos(angle) * radius;
+          const dy = cy + Math.sin(angle) * radius;
+          const phaseOffset = Math.max(-1, Math.min(1, dev.syncErrorMs / 20)) * 0.5;
+          const color = dev.syncState === 'tight' ? getComputedStyle(document.body).getPropertyValue('--sonar') : getComputedStyle(document.body).getPropertyValue('--drift');
+          drawNode(dx, dy, dev.name, color, phaseOffset, false);
+        });
+      }
+      requestAnimationFrame(drawSonar);
+    }
+
+    function drawNode(x, y, name, color, phaseOffset, isHost) {
+      if (!state.reducedMotion) {
+        for (let r = 0; r < 2; ++r) {
+          const prog = ((masterPhase + phaseOffset + (r * 0.5)) % 1.0 + 1.0) % 1.0;
+          const rad = 8 + (prog * (isHost ? 70 : 45));
+          const alpha = (1.0 - prog) * 0.6;
+          ctx.strokeStyle = color;
+          ctx.globalAlpha = alpha;
+          ctx.lineWidth = 1.5;
+          ctx.beginPath();
+          ctx.arc(x, y, rad, 0, 2 * Math.PI);
+          ctx.stroke();
+          ctx.globalAlpha = 1.0;
+        }
+      }
+
+      ctx.fillStyle = color;
+      ctx.beginPath();
+      ctx.arc(x, y, isHost ? 8 : 6, 0, 2 * Math.PI);
+      ctx.fill();
+
+      ctx.font = "500 12px Manrope, sans-serif";
+      ctx.fillStyle = getComputedStyle(document.body).getPropertyValue('--fog');
+      ctx.textAlign = "center";
+      ctx.fillText(name, x, y + 20);
+    }
+
+    requestAnimationFrame(drawSonar);
+  </script>
+</body>
+</html>

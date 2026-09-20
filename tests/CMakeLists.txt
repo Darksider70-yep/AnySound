@@ -17,6 +17,18 @@ add_executable(chorus_unit_tests
     unit/test_spsc_ring.cpp
     unit/test_opus_codec.cpp
     unit/test_udp_socket.cpp
+    unit/test_proto_packet.cpp
+    unit/test_clock_estimator.cpp
+    unit/test_timeline_buffer.cpp
+    unit/test_jitter_buffer.cpp
+    unit/test_resampler.cpp
+    unit/test_drift_controller.cpp
+    unit/test_fault_injection.cpp
+    unit/test_fuzz_proto.cpp
+    unit/test_control_message.cpp
+    unit/test_pin_authenticator.cpp
+    unit/test_tcp_socket.cpp
+    unit/test_host_fanout.cpp
 )
 
 target_link_libraries(chorus_unit_tests

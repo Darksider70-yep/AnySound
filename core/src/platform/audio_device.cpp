@@ -23,6 +23,8 @@
 
 #include <algorithm>
 #include <atomic>
+#include <chrono>
+#include <chorus/playback/timeline_buffer.hpp>
 
 namespace chorus {
 
@@ -152,6 +154,7 @@ uint64_t AudioCaptureDevice::frames_captured() const noexcept {
 struct PlaybackDeviceState {
     ma_device device{};
     SpscRing<float>* ring{nullptr};
+    TimelineBuffer* timeline{nullptr};
     std::atomic<bool> running{false};
     std::atomic<uint64_t> frames_rendered{0};
     std::atomic<uint64_t> underruns{0};
@@ -174,15 +177,22 @@ void playback_data_callback(ma_device* pDevice, void* pOutput, const void* pInpu
     auto* out_samples = static_cast<float*>(pOutput);
     const size_t needed_floats = static_cast<size_t>(frameCount) * static_cast<size_t>(kChannels);
 
-    if (state->ring == nullptr) {
+    if (state->timeline != nullptr) {
+        const auto now = std::chrono::steady_clock::now().time_since_epoch();
+        const auto current_local_us = static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::microseconds>(now).count());
+        const auto res = state->timeline->read_samples(std::span<float>(out_samples, needed_floats), current_local_us);
+        if (res != TimelineReadResult::Ok) {
+            state->underruns.fetch_add(1, std::memory_order_relaxed);
+        }
+    } else if (state->ring != nullptr) {
+        const size_t read_floats = state->ring->read(std::span<float>(out_samples, needed_floats));
+        if (read_floats < needed_floats) {
+            std::fill(out_samples + read_floats, out_samples + needed_floats, 0.0f);
+            state->underruns.fetch_add(1, std::memory_order_relaxed);
+        }
+    } else {
         std::fill(out_samples, out_samples + needed_floats, 0.0f);
         return;
-    }
-
-    const size_t read_floats = state->ring->read(std::span<float>(out_samples, needed_floats));
-    if (read_floats < needed_floats) {
-        std::fill(out_samples + read_floats, out_samples + needed_floats, 0.0f);
-        state->underruns.fetch_add(1, std::memory_order_relaxed);
     }
 
     state->frames_rendered.fetch_add(frameCount, std::memory_order_relaxed);
@@ -204,6 +214,38 @@ bool AudioPlaybackDevice::start_playback(SpscRing<float>* ring) {
         return true;
     }
     impl_->state.ring = ring;
+    impl_->state.timeline = nullptr;
+
+    ma_device_config config = ma_device_config_init(ma_device_type_playback);
+    config.playback.format = ma_format_f32;
+    config.playback.channels = kChannels;
+    config.sampleRate = kSampleRate;
+    config.dataCallback = playback_data_callback;
+    config.pUserData = &impl_->state;
+
+    ma_result result = ma_device_init(nullptr, &config, &impl_->state.device);
+    if (result != MA_SUCCESS) {
+        return false;
+    }
+    impl_->state.device_initialized = true;
+
+    result = ma_device_start(&impl_->state.device);
+    if (result != MA_SUCCESS) {
+        ma_device_uninit(&impl_->state.device);
+        impl_->state.device_initialized = false;
+        return false;
+    }
+
+    impl_->state.running.store(true);
+    return true;
+}
+
+bool AudioPlaybackDevice::start_playback(TimelineBuffer* timeline) {
+    if (impl_->state.running.load()) {
+        return true;
+    }
+    impl_->state.timeline = timeline;
+    impl_->state.ring = nullptr;
 
     ma_device_config config = ma_device_config_init(ma_device_type_playback);
     config.playback.format = ma_format_f32;
