@@ -32,6 +32,7 @@ class ChorusPlaybackService : Service() {
 
     private var wakeLock: PowerManager.WakeLock? = null
     private var wifiLock: WifiManager.WifiLock? = null
+    private var multicastLock: WifiManager.MulticastLock? = null
 
     private val bridge = NativeChorusBridge()
     private val _snapshot = MutableStateFlow(AppSnapshot())
@@ -144,6 +145,11 @@ class ChorusPlaybackService : Service() {
             setReferenceCounted(false)
             acquire()
         }
+
+        multicastLock = wifiManager.createMulticastLock("Chorus:MulticastLock").apply {
+            setReferenceCounted(false)
+            acquire()
+        }
     }
 
     private fun releaseLocks() {
@@ -156,6 +162,11 @@ class ChorusPlaybackService : Service() {
             if (it.isHeld) it.release()
         }
         wifiLock = null
+
+        multicastLock?.let {
+            if (it.isHeld) it.release()
+        }
+        multicastLock = null
     }
 
     private fun createNotificationChannel() {

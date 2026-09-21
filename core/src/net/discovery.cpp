@@ -37,6 +37,7 @@ bool DiscoveryScanner::start(uint16_t port) {
         return false;
     }
     (void)socket_.set_recv_timeout_ms(1);
+    (void)socket_.enable_broadcast(true);
     is_running_ = true;
     return true;
 }
@@ -132,6 +133,7 @@ bool DiscoveryBroadcaster::start(std::string_view host_name,
     if (!socket_.bind(0, "0.0.0.0")) {
         return false;
     }
+    (void)socket_.enable_broadcast(true);
     is_running_ = true;
     last_broadcast_sec_ = 0;
     return true;
@@ -160,15 +162,22 @@ void DiscoveryBroadcaster::update() {
         };
 
         const std::string payload = json_obj.dump();
+        const std::span<const uint8_t> payload_span(
+            reinterpret_cast<const uint8_t*>(payload.data()), payload.size());
+
+        // Broadcast to LAN
         const Endpoint broadcast_dest{
-            .address = "127.0.0.1",  // Localhost broadcast for test / 255.255.255.255 for LAN
+            .address = "255.255.255.255",
             .port = broadcast_port_
         };
+        (void)socket_.send_to(payload_span, broadcast_dest);
 
-        (void)socket_.send_to(
-            std::span<const uint8_t>(reinterpret_cast<const uint8_t*>(payload.data()), payload.size()),
-            broadcast_dest
-        );
+        // Also send to localhost for same-machine discovery
+        const Endpoint local_dest{
+            .address = "127.0.0.1",
+            .port = broadcast_port_
+        };
+        (void)socket_.send_to(payload_span, local_dest);
 
         last_broadcast_sec_ = now_sec;
     }

@@ -181,6 +181,23 @@ bool UdpSocket::set_recv_timeout_ms(int timeout_ms) {
     return (result_code != kSocketError);
 }
 
+bool UdpSocket::enable_broadcast(bool enable) {
+    if (!is_valid()) {
+        return false;
+    }
+    const auto socket_fd = static_cast<sock_t>(socket_handle_);
+#ifdef _WIN32
+    const BOOL opt = enable ? TRUE : FALSE;
+    const int result_code = setsockopt(socket_fd, SOL_SOCKET, SO_BROADCAST,
+                                       reinterpret_cast<const char*>(&opt), sizeof(opt));
+#else
+    const int opt = enable ? 1 : 0;
+    const int result_code = setsockopt(socket_fd, SOL_SOCKET, SO_BROADCAST,
+                                       &opt, sizeof(opt));
+#endif
+    return (result_code != kSocketError);
+}
+
 bool UdpSocket::send_to(std::span<const uint8_t> data, const Endpoint& dest) {
     if (!is_valid() || data.empty()) {
         return false;
