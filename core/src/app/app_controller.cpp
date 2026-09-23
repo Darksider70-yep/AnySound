@@ -138,18 +138,9 @@ void AppController::update() {
         host_session_.update();
 
         // Pull audio frames from capture ring or generate sine tone
-        std::vector<float> frame_pcm(static_cast<size_t>(kFloatsPerFrame));
-        bool has_frame = false;
-
         if (use_test_tone_) {
+            std::vector<float> frame_pcm(static_cast<size_t>(kFloatsPerFrame));
             generate_test_sine(frame_pcm);
-            has_frame = true;
-        } else if (capture_ring_.size() >= static_cast<size_t>(kFloatsPerFrame)) {
-            const size_t read_floats = capture_ring_.read(frame_pcm);
-            has_frame = (read_floats == static_cast<size_t>(kFloatsPerFrame));
-        }
-
-        if (has_frame) {
             (void)host_session_.broadcast_audio_frame(frame_pcm);
             if (delayed_host_enabled_) {
                 auto now_us = static_cast<uint64_t>(
@@ -158,6 +149,24 @@ void AppController::update() {
                     ).count()
                 );
                 delayed_host_renderer_.submit_frame(frame_pcm, now_us);
+            }
+        } else {
+            std::vector<float> frame_pcm(static_cast<size_t>(kFloatsPerFrame));
+            while (capture_ring_.size() >= static_cast<size_t>(kFloatsPerFrame)) {
+                const size_t read_floats = capture_ring_.read(frame_pcm);
+                if (read_floats == static_cast<size_t>(kFloatsPerFrame)) {
+                    (void)host_session_.broadcast_audio_frame(frame_pcm);
+                    if (delayed_host_enabled_) {
+                        auto now_us = static_cast<uint64_t>(
+                            std::chrono::duration_cast<std::chrono::microseconds>(
+                                std::chrono::steady_clock::now().time_since_epoch()
+                            ).count()
+                        );
+                        delayed_host_renderer_.submit_frame(frame_pcm, now_us);
+                    }
+                } else {
+                    break;
+                }
             }
         }
     } else if (role_ == AppRole::Client) {

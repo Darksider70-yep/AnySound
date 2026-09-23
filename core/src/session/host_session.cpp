@@ -244,8 +244,7 @@ size_t HostSession::broadcast_audio_frame(std::span<const float> frame_pcm) {
         return 0;
     }
 
-    const uint64_t frame_capture_us = stream_anchor_host_us_ +
-        ((total_samples_streamed_ * 1000000ULL) / static_cast<uint64_t>(kSampleRate));
+    const uint64_t frame_capture_us = current_steady_us();
     const uint64_t play_at_host_us = frame_capture_us + (target_latency_ms_ * 1000ULL);
 
     const AudioPacket pkt{
