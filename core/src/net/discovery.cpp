@@ -3,6 +3,22 @@
 
 #include <nlohmann/json.hpp>
 #include <chrono>
+#include <unordered_set>
+#include <vector>
+
+#ifdef _WIN32
+    #ifndef WIN32_LEAN_AND_MEAN
+        #define WIN32_LEAN_AND_MEAN
+    #endif
+    #include <winsock2.h>
+    #include <ws2tcpip.h>
+    #include <iphlpapi.h>
+#else
+    #include <arpa/inet.h>
+    #include <ifaddrs.h>
+    #include <net/if.h>
+    #include <netinet/in.h>
+#endif
 
 namespace chorus {
 
@@ -13,10 +29,76 @@ namespace {
 inline constexpr size_t kDiscoveryBufferSize = 1024;
 inline constexpr uint64_t kPruneThresholdSec = 6;
 inline constexpr uint64_t kBroadcastIntervalSec = 2;
+inline constexpr const char* kMulticastDiscoveryGroup = "239.255.77.77";
 
 uint64_t get_current_epoch_sec() noexcept {
     const auto now = std::chrono::system_clock::now().time_since_epoch();
     return static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::seconds>(now).count());
+}
+
+std::vector<std::string> get_broadcast_target_ips() {
+    std::unordered_set<std::string> ips;
+    ips.insert("255.255.255.255");
+    ips.insert(kMulticastDiscoveryGroup);
+    ips.insert("127.0.0.1");
+
+#ifdef _WIN32
+    ULONG buf_len = 15000;
+    std::vector<uint8_t> buffer(buf_len);
+    auto* addresses = reinterpret_cast<IP_ADAPTER_ADDRESSES*>(buffer.data());
+    ULONG ret = GetAdaptersAddresses(AF_INET, GAA_FLAG_INCLUDE_PREFIX, nullptr, addresses, &buf_len);
+    if (ret == ERROR_BUFFER_OVERFLOW) {
+        buffer.resize(buf_len);
+        addresses = reinterpret_cast<IP_ADAPTER_ADDRESSES*>(buffer.data());
+        ret = GetAdaptersAddresses(AF_INET, GAA_FLAG_INCLUDE_PREFIX, nullptr, addresses, &buf_len);
+    }
+    if (ret == NO_ERROR) {
+        for (auto* curr = addresses; curr != nullptr; curr = curr->Next) {
+            if (curr->OperStatus != IfOperStatusUp || curr->IfType == IF_TYPE_SOFTWARE_LOOPBACK) {
+                continue;
+            }
+            for (auto* unicast = curr->FirstUnicastAddress; unicast != nullptr; unicast = unicast->Next) {
+                if (unicast->Address.lpSockaddr != nullptr && unicast->Address.lpSockaddr->sa_family == AF_INET) {
+                    auto* sa_in = reinterpret_cast<sockaddr_in*>(unicast->Address.lpSockaddr);
+                    uint32_t ip = ntohl(sa_in->sin_addr.s_addr);
+                    UINT8 prefix_len = unicast->OnLinkPrefixLength;
+                    if (prefix_len > 0 && prefix_len < 32) {
+                        uint32_t mask = 0xFFFFFFFFU << (32 - prefix_len);
+                        uint32_t bcast = (ip & mask) | (~mask);
+                        struct in_addr bcast_addr{};
+                        bcast_addr.s_addr = htonl(bcast);
+                        std::array<char, INET_ADDRSTRLEN> str_buf{};
+                        if (inet_ntop(AF_INET, &bcast_addr, str_buf.data(), str_buf.size()) != nullptr) {
+                            ips.insert(str_buf.data());
+                        }
+                    }
+                }
+            }
+        }
+    }
+#else
+    struct ifaddrs* ifaddr = nullptr;
+    if (getifaddrs(&ifaddr) != -1) {
+        for (auto* ifa = ifaddr; ifa != nullptr; ifa = ifa->ifa_next) {
+            if (ifa->ifa_addr == nullptr || ifa->ifa_addr->sa_family != AF_INET) {
+                continue;
+            }
+            if ((ifa->ifa_flags & IFF_UP) == 0 || (ifa->ifa_flags & IFF_LOOPBACK) != 0) {
+                continue;
+            }
+            if ((ifa->ifa_flags & IFF_BROADCAST) != 0 && ifa->ifa_broadaddr != nullptr) {
+                auto* sa_in = reinterpret_cast<sockaddr_in*>(ifa->ifa_broadaddr);
+                std::array<char, INET_ADDRSTRLEN> str_buf{};
+                if (inet_ntop(AF_INET, &sa_in->sin_addr, str_buf.data(), str_buf.size()) != nullptr) {
+                    ips.insert(str_buf.data());
+                }
+            }
+        }
+        freeifaddrs(ifaddr);
+    }
+#endif
+
+    return std::vector<std::string>(ips.begin(), ips.end());
 }
 
 }  // namespace
@@ -38,6 +120,7 @@ bool DiscoveryScanner::start(uint16_t port) {
     }
     (void)socket_.set_recv_timeout_ms(1);
     (void)socket_.enable_broadcast(true);
+    (void)socket_.join_multicast_group(kMulticastDiscoveryGroup);
     is_running_ = true;
     return true;
 }
@@ -165,19 +248,14 @@ void DiscoveryBroadcaster::update() {
         const std::span<const uint8_t> payload_span(
             reinterpret_cast<const uint8_t*>(payload.data()), payload.size());
 
-        // Broadcast to LAN
-        const Endpoint broadcast_dest{
-            .address = "255.255.255.255",
-            .port = broadcast_port_
-        };
-        (void)socket_.send_to(payload_span, broadcast_dest);
-
-        // Also send to localhost for same-machine discovery
-        const Endpoint local_dest{
-            .address = "127.0.0.1",
-            .port = broadcast_port_
-        };
-        (void)socket_.send_to(payload_span, local_dest);
+        const auto targets = get_broadcast_target_ips();
+        for (const auto& target_ip : targets) {
+            const Endpoint dest{
+                .address = target_ip,
+                .port = broadcast_port_
+            };
+            (void)socket_.send_to(payload_span, dest);
+        }
 
         last_broadcast_sec_ = now_sec;
     }

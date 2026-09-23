@@ -146,6 +146,19 @@ bool UdpSocket::bind(uint16_t port, std::string_view interface_ip) {
         return false;
     }
 
+    const auto socket_fd = static_cast<sock_t>(socket_handle_);
+
+#ifdef _WIN32
+    const BOOL reuse = TRUE;
+    (void)setsockopt(socket_fd, SOL_SOCKET, SO_REUSEADDR, reinterpret_cast<const char*>(&reuse), sizeof(reuse));
+#else
+    const int reuse = 1;
+    (void)setsockopt(socket_fd, SOL_SOCKET, SO_REUSEADDR, &reuse, sizeof(reuse));
+#ifdef SO_REUSEPORT
+    (void)setsockopt(socket_fd, SOL_SOCKET, SO_REUSEPORT, &reuse, sizeof(reuse));
+#endif
+#endif
+
     sockaddr_in addr{};
     addr.sin_family = AF_INET;
     addr.sin_port = htons(port);
@@ -158,7 +171,6 @@ bool UdpSocket::bind(uint16_t port, std::string_view interface_ip) {
         }
     }
 
-    const auto socket_fd = static_cast<sock_t>(socket_handle_);
     const int result_code = ::bind(socket_fd, reinterpret_cast<const sockaddr*>(&addr), sizeof(addr));
     return (result_code != kSocketError);
 }
@@ -195,6 +207,22 @@ bool UdpSocket::enable_broadcast(bool enable) {
     const int result_code = setsockopt(socket_fd, SOL_SOCKET, SO_BROADCAST,
                                        &opt, sizeof(opt));
 #endif
+    return (result_code != kSocketError);
+}
+
+bool UdpSocket::join_multicast_group(std::string_view group_ip) {
+    if (!is_valid()) {
+        return false;
+    }
+    struct ip_mreq mreq{};
+    std::string ip_str(group_ip);
+    if (inet_pton(AF_INET, ip_str.c_str(), &mreq.imr_multiaddr) <= 0) {
+        return false;
+    }
+    mreq.imr_interface.s_addr = INADDR_ANY;
+    const auto socket_fd = static_cast<sock_t>(socket_handle_);
+    const int result_code = setsockopt(socket_fd, IPPROTO_IP, IP_ADD_MEMBERSHIP,
+                                       reinterpret_cast<const char*>(&mreq), sizeof(mreq));
     return (result_code != kSocketError);
 }
 

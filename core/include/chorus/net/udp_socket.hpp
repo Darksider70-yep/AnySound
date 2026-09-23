@@ -55,6 +55,9 @@ public:
     /// @brief Enables or disables SO_BROADCAST on the UDP socket.
     [[nodiscard]] bool enable_broadcast(bool enable = true);
 
+    /// @brief Joins an IPv4 multicast group.
+    [[nodiscard]] bool join_multicast_group(std::string_view group_ip);
+
     /// @brief Sends a datagram to the specified destination.
     [[nodiscard]] bool send_to(std::span<const uint8_t> data, const Endpoint& dest);
 

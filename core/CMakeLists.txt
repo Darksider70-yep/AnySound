@@ -44,5 +44,6 @@ if(WIN32)
     target_link_libraries(chorus_core
         PUBLIC
             ws2_32
+            iphlpapi
     )
 endif()

@@ -49,7 +49,7 @@ fun ClientFindScreen(
     onJoin: (hostIp: String, port: Int, pin: String) -> Unit,
     modifier: Modifier = Modifier
 ) {
-    var hostIp by remember { mutableStateOf("127.0.0.1") }
+    var hostIp by remember { mutableStateOf("") }
     var portStr by remember { mutableStateOf("47800") }
     var pin by remember { mutableStateOf("") }
     var showManual by remember { mutableStateOf(false) }
@@ -227,6 +227,7 @@ fun ClientFindScreen(
                         value = hostIp,
                         onValueChange = { hostIp = it },
                         label = { Text("Host IP") },
+                        placeholder = { Text("e.g. 192.168.1.16", color = ChorusTheme.colors.mist.copy(alpha = 0.5f)) },
                         modifier = Modifier.weight(2.0f),
                         colors = OutlinedTextFieldDefaults.colors(
                             focusedBorderColor = ChorusTheme.colors.sonar,
