@@ -148,12 +148,16 @@ bool TcpStream::connect(const Endpoint& endpoint, int timeout_ms) {
         FD_ZERO(&write_fds);
         FD_SET(socket_fd, &write_fds);
 
+        fd_set except_fds;
+        FD_ZERO(&except_fds);
+        FD_SET(socket_fd, &except_fds);
+
         timeval time_val{};
         time_val.tv_sec = timeout_ms / kMillisPerSecond;
         time_val.tv_usec = (timeout_ms % kMillisPerSecond) * kMillisPerSecond;
 
-        res = select(static_cast<int>(socket_fd + 1), nullptr, &write_fds, nullptr, &time_val);
-        if (res <= 0) {
+        res = select(static_cast<int>(socket_fd + 1), nullptr, &write_fds, &except_fds, &time_val);
+        if (res <= 0 || FD_ISSET(socket_fd, &except_fds)) {
 #ifdef _WIN32
             closesocket(socket_fd);
 #else
@@ -161,6 +165,21 @@ bool TcpStream::connect(const Endpoint& endpoint, int timeout_ms) {
 #endif
             return false;
         }
+
+        int so_error = 0;
+#ifdef _WIN32
+        int len = sizeof(so_error);
+        if (getsockopt(socket_fd, SOL_SOCKET, SO_ERROR, reinterpret_cast<char*>(&so_error), &len) != 0 || so_error != 0) {
+            closesocket(socket_fd);
+            return false;
+        }
+#else
+        socklen_t len = sizeof(so_error);
+        if (getsockopt(socket_fd, SOL_SOCKET, SO_ERROR, &so_error, &len) != 0 || so_error != 0) {
+            ::close(socket_fd);
+            return false;
+        }
+#endif
     }
 
     // Disable Nagle's algorithm for low-latency control messages
