@@ -323,8 +323,11 @@ int32_t ClientSession::offset_ms() const noexcept {
 }
 
 ClientStatsMessage ClientSession::stats() const {
+    const int64_t sync_err = clock_estimator_.is_synchronized()
+        ? (clock_estimator_.min_rtt_us() / 2)
+        : 0;
     return ClientStatsMessage{
-        .sync_error_us = clock_estimator_.offset_us(),
+        .sync_error_us = sync_err,
         .skew_ppm = clock_estimator_.skew_ppm(),
         .underruns = playback_device_.underruns(),
         .late = timeline_buffer_.late_frames_dropped(),
