@@ -69,8 +69,8 @@ public:
     void reset() noexcept;
 
 private:
-    const size_t max_buffered_frames_;
-    const size_t prebuffer_frames_;
+    size_t max_buffered_frames_{50};
+    size_t prebuffer_frames_{5};
 
     std::map<uint32_t, JitterFrame> queue_;
     bool is_initialized_{false};
