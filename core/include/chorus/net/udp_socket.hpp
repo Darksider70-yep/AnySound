@@ -75,6 +75,7 @@ public:
     [[nodiscard]] uint16_t local_port() const;
 
 private:
+    bool ensure_valid_socket();
     intptr_t socket_handle_{-1};
 };
 

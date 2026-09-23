@@ -125,6 +125,19 @@ UdpSocket& UdpSocket::operator=(UdpSocket&& other) noexcept {
     return *this;
 }
 
+bool UdpSocket::ensure_valid_socket() {
+    ensure_winsock_initialized();
+    if (is_valid()) {
+        return true;
+    }
+    const sock_t new_sock = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
+    if (new_sock == kInvalidSock) {
+        return false;
+    }
+    socket_handle_ = static_cast<intptr_t>(new_sock);
+    return true;
+}
+
 bool UdpSocket::is_valid() const noexcept {
     return socket_handle_ != -1 && static_cast<sock_t>(socket_handle_) != kInvalidSock;
 }
@@ -142,7 +155,7 @@ void UdpSocket::close() noexcept {
 }
 
 bool UdpSocket::bind(uint16_t port, std::string_view interface_ip) {
-    if (!is_valid()) {
+    if (!ensure_valid_socket()) {
         return false;
     }
 
@@ -176,7 +189,7 @@ bool UdpSocket::bind(uint16_t port, std::string_view interface_ip) {
 }
 
 bool UdpSocket::set_recv_timeout_ms(int timeout_ms) {
-    if (!is_valid()) {
+    if (!ensure_valid_socket()) {
         return false;
     }
     const auto socket_fd = static_cast<sock_t>(socket_handle_);
@@ -194,7 +207,7 @@ bool UdpSocket::set_recv_timeout_ms(int timeout_ms) {
 }
 
 bool UdpSocket::enable_broadcast(bool enable) {
-    if (!is_valid()) {
+    if (!ensure_valid_socket()) {
         return false;
     }
     const auto socket_fd = static_cast<sock_t>(socket_handle_);
@@ -211,7 +224,7 @@ bool UdpSocket::enable_broadcast(bool enable) {
 }
 
 bool UdpSocket::join_multicast_group(std::string_view group_ip) {
-    if (!is_valid()) {
+    if (!ensure_valid_socket()) {
         return false;
     }
     struct ip_mreq mreq{};
@@ -227,7 +240,7 @@ bool UdpSocket::join_multicast_group(std::string_view group_ip) {
 }
 
 bool UdpSocket::send_to(std::span<const uint8_t> data, const Endpoint& dest) {
-    if (!is_valid() || data.empty()) {
+    if (!ensure_valid_socket() || data.empty()) {
         return false;
     }
 

@@ -219,6 +219,7 @@ bool DiscoveryBroadcaster::start(std::string_view host_name,
     (void)socket_.enable_broadcast(true);
     is_running_ = true;
     last_broadcast_sec_ = 0;
+    update(); // Send initial beacon immediately
     return true;
 }
 
