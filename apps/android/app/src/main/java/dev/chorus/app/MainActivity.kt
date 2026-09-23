@@ -82,7 +82,7 @@ class MainActivity : ComponentActivity() {
 
                 // Handle automatic navigation upon active session
                 LaunchedEffect(snapshot.role, snapshot.isActive) {
-                    if (snapshot.role == AppRole.Client && snapshot.isActive) {
+                    if (snapshot.role == AppRole.Client) {
                         if (navController.currentDestination?.route != "listening") {
                             navController.navigate("listening") {
                                 popUpTo("home")

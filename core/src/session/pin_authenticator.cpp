@@ -23,10 +23,10 @@ PinAuthenticator::PinAuthenticator(std::string_view fixed_pin,
                                    std::chrono::seconds window_duration)
     : max_attempts_per_minute_(max_attempts_per_minute),
       window_duration_sec_(static_cast<uint64_t>(window_duration.count())) {
-    if (!fixed_pin.empty()) {
-        pin_ = std::string(fixed_pin);
-    } else {
+    if (fixed_pin == "random" || fixed_pin == "auto") {
         (void)generate_random_pin();
+    } else {
+        pin_ = std::string(fixed_pin);
     }
 }
 
@@ -78,8 +78,8 @@ PinAuthResult PinAuthenticator::verify(std::string_view client_ip,
         return PinAuthResult::RateLimited;
     }
 
-    // Check PIN matching
-    if (submitted_pin == pin_) {
+    // Check PIN matching (open session if PIN is not configured)
+    if (pin_.empty() || submitted_pin == pin_) {
         failed_attempts_.erase(ip_key);
         return PinAuthResult::Success;
     }

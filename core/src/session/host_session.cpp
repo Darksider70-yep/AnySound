@@ -35,10 +35,10 @@ bool HostSession::start(uint16_t tcp_port, uint16_t udp_port, std::string_view p
     tcp_port_ = tcp_port;
     udp_port_ = udp_port;
 
-    if (!pin.empty()) {
-        pin_auth_.set_pin(pin);
-    } else {
+    if (pin == "random" || pin == "auto") {
         (void)pin_auth_.generate_random_pin();
+    } else {
+        pin_auth_.set_pin(pin);
     }
 
     if (!tcp_listener_.listen(tcp_port_)) {
