@@ -49,19 +49,26 @@ bool TimelineBuffer::insert_frame(uint64_t local_play_us, std::span<const float>
 }
 
 TimelineReadResult TimelineBuffer::read_samples(std::span<float> out_pcm, uint64_t current_local_us) noexcept {
-    (void)current_local_us;
-
     if (!is_anchored_.load(std::memory_order_acquire) || out_pcm.empty()) {
         std::ranges::fill(out_pcm, 0.0F);
         return TimelineReadResult::Empty;
     }
+
+    if (current_local_us < anchor_local_us_) {
+        // Still in prebuffering window before scheduled anchor playout
+        std::ranges::fill(out_pcm, 0.0F);
+        return TimelineReadResult::Empty;
+    }
+
+    const uint64_t elapsed_us = current_local_us - anchor_local_us_;
+    const uint64_t target_playhead_idx = (elapsed_us * static_cast<uint64_t>(kSampleRate)) / 1000000ULL;
 
     const size_t needed_frames = out_pcm.size() / static_cast<size_t>(kChannels);
     const size_t total_frames_capacity = capacity_samples_ / static_cast<size_t>(kChannels);
 
     bool has_gap = false;
     for (size_t i = 0; i < needed_frames; ++i) {
-        const size_t f = (playhead_sample_index_ + i) % total_frames_capacity;
+        const size_t f = (target_playhead_idx + i) % total_frames_capacity;
         const size_t base_idx = f * static_cast<size_t>(kChannels);
 
         if (valid_mask_[f] == 1) {
@@ -75,7 +82,7 @@ TimelineReadResult TimelineBuffer::read_samples(std::span<float> out_pcm, uint64
         }
     }
 
-    playhead_sample_index_ += needed_frames;
+    playhead_sample_index_ = target_playhead_idx + needed_frames;
 
     if (has_gap) {
         gaps_.fetch_add(1, std::memory_order_relaxed);
