@@ -10,6 +10,7 @@
 #include <chorus/session/host_session.hpp>
 #include <chorus/sync/latency_tuner.hpp>
 
+#include <chrono>
 #include <cstdint>
 #include <string>
 #include <vector>
@@ -107,6 +108,7 @@ private:
     bool delayed_host_enabled_{false};
     double tone_phase_{0.0};
     uint64_t target_latency_ms_{kDefaultTargetLatencyMs};
+    std::chrono::steady_clock::time_point last_test_tone_time_;
 
     HostSession host_session_;
     ClientSession client_session_;

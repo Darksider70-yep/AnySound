@@ -3,6 +3,7 @@
 #include <chorus/codec/opus_codec.hpp>
 #include <chorus/core.hpp>
 #include <chorus/net/control_message.hpp>
+#include <chorus/net/crypto_channel.hpp>
 #include <chorus/net/tcp_socket.hpp>
 #include <chorus/net/udp_socket.hpp>
 #include <chorus/session/pin_authenticator.hpp>
@@ -76,6 +77,12 @@ public:
     /// @brief Returns number of authenticated clients.
     [[nodiscard]] size_t authenticated_client_count() const;
 
+    /// @brief Sets symmetric key for AEAD encrypted UDP transport.
+    void set_encryption_key(std::span<const uint8_t, kCryptoKeySize> key);
+
+    /// @brief Clears encryption key and disables encrypted transport.
+    void clear_encryption();
+
     /// @brief Returns true if host session is running.
     [[nodiscard]] bool is_running() const noexcept;
 
@@ -96,6 +103,7 @@ private:
     UdpSocket udp_socket_;
     PinAuthenticator pin_auth_;
     OpusEncoderWrap encoder_;
+    CryptoChannel crypto_channel_;
 
     std::vector<ConnectedClient> clients_;
     mutable std::mutex clients_mutex_;

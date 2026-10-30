@@ -64,4 +64,41 @@ TEST_CASE("HostSession multi-client authentication and fan-out broadcast", "[ses
     REQUIRE(client1.volume() == 0.75F);
     REQUIRE(client2.is_muted() == true);
 }
+
+TEST_CASE("HostSession and ClientSession encrypted audio transmission", "[session][crypto]") {
+    constexpr uint16_t kTestTcpPort = 47870;
+    constexpr uint16_t kTestUdpPort = 47871;
+    constexpr std::string_view kTestPin = "4321";
+
+    chorus::HostSession host(300);
+    REQUIRE(host.start(kTestTcpPort, kTestUdpPort, kTestPin));
+
+    std::array<uint8_t, chorus::kCryptoKeySize> key{};
+    std::fill(key.begin(), key.end(), 0x33);
+    host.set_encryption_key(key);
+
+    chorus::ClientSession client("Client Encrypted");
+    client.set_encryption_key(key);
+    REQUIRE(client.connect("127.0.0.1", kTestTcpPort, 47872, kTestPin));
+
+    for (int i = 0; i < 15; ++i) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+        host.update();
+        client.update();
+    }
+
+    REQUIRE(host.authenticated_client_count() == 1);
+
+    std::vector<float> frame_pcm(chorus::kFloatsPerFrame, 0.4F);
+    const size_t sent_count = host.broadcast_audio_frame(frame_pcm);
+    REQUIRE(sent_count == 1);
+
+    for (int i = 0; i < 5; ++i) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+        client.update();
+    }
+
+    const auto stats = client.stats();
+    REQUIRE(stats.loss_pct == 0.0);
+}
 // NOLINTEND

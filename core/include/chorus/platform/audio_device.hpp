@@ -8,6 +8,7 @@
 
 namespace chorus {
 class TimelineBuffer;
+class Resampler;
 
 /// @brief Audio capture device wrapping miniaudio WASAPI loopback capture.
 /// Reads system audio output and pushes PCM float samples into an SPSC ring buffer.
@@ -55,9 +56,10 @@ public:
     /// @param ring Source lock-free ring buffer providing audio floats.
     [[nodiscard]] bool start_playback(SpscRing<float>* ring);
 
-    /// @brief Starts audio playback from a scheduled TimelineBuffer.
+    /// @brief Starts audio playback from a scheduled TimelineBuffer with optional fractional Resampler.
     /// @param timeline Scheduled timeline buffer providing audio floats at target timestamps.
-    [[nodiscard]] bool start_playback(TimelineBuffer* timeline);
+    /// @param resampler Optional dynamic resampler for seamless clock drift tracking.
+    [[nodiscard]] bool start_playback(TimelineBuffer* timeline, Resampler* resampler = nullptr);
 
     /// @brief Stops audio playback.
     void stop();

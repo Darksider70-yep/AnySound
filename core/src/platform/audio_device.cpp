@@ -25,6 +25,7 @@
 #include <atomic>
 #include <chrono>
 #include <chorus/playback/timeline_buffer.hpp>
+#include <chorus/sync/resampler.hpp>
 
 namespace chorus {
 
@@ -155,6 +156,8 @@ struct PlaybackDeviceState {
     ma_device device{};
     SpscRing<float>* ring{nullptr};
     TimelineBuffer* timeline{nullptr};
+    Resampler* resampler{nullptr};
+    std::vector<float> scratch_buffer{};
     std::atomic<bool> running{false};
     std::atomic<uint64_t> frames_rendered{0};
     std::atomic<uint64_t> underruns{0};
@@ -180,9 +183,37 @@ void playback_data_callback(ma_device* pDevice, void* pOutput, const void* pInpu
     if (state->timeline != nullptr) {
         const auto now = std::chrono::steady_clock::now().time_since_epoch();
         const auto current_local_us = static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::microseconds>(now).count());
-        const auto res = state->timeline->read_samples(std::span<float>(out_samples, needed_floats), current_local_us);
-        if (res != TimelineReadResult::Ok) {
-            state->underruns.fetch_add(1, std::memory_order_relaxed);
+
+        if (state->resampler != nullptr && std::abs(state->resampler->ratio() - 1.0) >= 1e-7) {
+            const double ratio = state->resampler->ratio();
+            const size_t in_frames_needed = static_cast<size_t>(std::ceil(static_cast<double>(frameCount) * ratio)) + 4;
+            const size_t in_floats_needed = in_frames_needed * static_cast<size_t>(kChannels);
+
+            if (in_floats_needed <= state->scratch_buffer.size()) {
+                const auto res = state->timeline->read_samples(
+                    std::span<float>(state->scratch_buffer.data(), in_floats_needed), current_local_us
+                );
+                if (res != TimelineReadResult::Ok) {
+                    state->underruns.fetch_add(1, std::memory_order_relaxed);
+                }
+                const size_t out_frames = state->resampler->process(
+                    std::span<const float>(state->scratch_buffer.data(), in_floats_needed),
+                    std::span<float>(out_samples, needed_floats)
+                );
+                if (out_frames < static_cast<size_t>(frameCount)) {
+                    std::fill(out_samples + (out_frames * static_cast<size_t>(kChannels)), out_samples + needed_floats, 0.0F);
+                }
+            } else {
+                const auto res = state->timeline->read_samples(std::span<float>(out_samples, needed_floats), current_local_us);
+                if (res != TimelineReadResult::Ok) {
+                    state->underruns.fetch_add(1, std::memory_order_relaxed);
+                }
+            }
+        } else {
+            const auto res = state->timeline->read_samples(std::span<float>(out_samples, needed_floats), current_local_us);
+            if (res != TimelineReadResult::Ok) {
+                state->underruns.fetch_add(1, std::memory_order_relaxed);
+            }
         }
     } else if (state->ring != nullptr) {
         const size_t read_floats = state->ring->read(std::span<float>(out_samples, needed_floats));
@@ -240,11 +271,13 @@ bool AudioPlaybackDevice::start_playback(SpscRing<float>* ring) {
     return true;
 }
 
-bool AudioPlaybackDevice::start_playback(TimelineBuffer* timeline) {
+bool AudioPlaybackDevice::start_playback(TimelineBuffer* timeline, Resampler* resampler) {
     if (impl_->state.running.load()) {
         return true;
     }
     impl_->state.timeline = timeline;
+    impl_->state.resampler = resampler;
+    impl_->state.scratch_buffer.assign(4096, 0.0F);
     impl_->state.ring = nullptr;
 
     ma_device_config config = ma_device_config_init(ma_device_type_playback);

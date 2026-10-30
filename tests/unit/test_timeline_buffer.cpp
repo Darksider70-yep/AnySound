@@ -49,4 +49,21 @@ TEST_CASE("TimelineBuffer late frame rejection and gap detection", "[playback][t
     REQUIRE_FALSE(buffer.insert_frame(1010000ULL, frame));
     REQUIRE(buffer.late_frames_dropped() == 1);
 }
+
+TEST_CASE("TimelineBuffer variable-length resampled frame insertion", "[playback][timeline]") {
+    chorus::TimelineBuffer buffer(48000);
+
+    // Insert 959-sample frame (1918 floats)
+    std::vector<float> frame_shorter(959 * 2, 0.33F);
+    REQUIRE(buffer.insert_frame(1000000ULL, frame_shorter));
+    REQUIRE(buffer.is_active());
+
+    // Insert 961-sample frame (1922 floats)
+    std::vector<float> frame_longer(961 * 2, 0.66F);
+    REQUIRE(buffer.insert_frame(1020000ULL, frame_longer));
+
+    // Verify rejection of invalid unaligned buffer (odd number of floats)
+    std::vector<float> invalid_unaligned(961, 0.1F);
+    REQUIRE_FALSE(buffer.insert_frame(1040000ULL, invalid_unaligned));
+}
 // NOLINTEND

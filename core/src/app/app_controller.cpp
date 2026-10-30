@@ -34,6 +34,7 @@ bool AppController::start_host(std::string_view pin,
     use_test_tone_ = use_test_tone;
     target_latency_ms_ = target_latency_ms;
     tone_phase_ = 0.0;
+    last_test_tone_time_ = std::chrono::steady_clock::now() - std::chrono::milliseconds(kFrameDurationMs);
 
     if (is_encrypted_) {
         // Derive session key using PIN as salt
@@ -45,6 +46,9 @@ bool AppController::start_host(std::string_view pin,
         };
         auto key = CryptoChannel::derive_session_key(ikm, pin);
         crypto_channel_.set_key(key);
+        host_session_.set_encryption_key(key);
+    } else {
+        host_session_.clear_encryption();
     }
 
     if (!host_session_.start(kDefaultTcpControlPort, kDefaultUdpDataPort, pin)) {
@@ -75,6 +79,7 @@ void AppController::stop_host() {
         delayed_host_renderer_.stop();
         discovery_broadcaster_.stop();
         capture_device_.stop();
+        host_session_.clear_encryption();
         host_session_.stop();
         role_ = AppRole::Idle;
         DiagnosticLogger::instance().log(DiagnosticEventType::SessionStopped, "Host session stopped");
@@ -96,6 +101,9 @@ bool AppController::join_host(std::string_view host_ip,
         };
         auto key = CryptoChannel::derive_session_key(ikm, pin);
         crypto_channel_.set_key(key);
+        client_session_.set_encryption_key(key);
+    } else {
+        client_session_.clear_encryption();
     }
 
     if (!client_session_.connect(host_ip, tcp_port, kDefaultClientDataPort, pin)) {
@@ -110,6 +118,7 @@ bool AppController::join_host(std::string_view host_ip,
 
 void AppController::leave_host() {
     if (role_ == AppRole::Client) {
+        client_session_.clear_encryption();
         client_session_.disconnect();
         role_ = AppRole::Idle;
         DiagnosticLogger::instance().log(DiagnosticEventType::ClientDisconnected, "Client left host");
@@ -139,16 +148,20 @@ void AppController::update() {
 
         // Pull audio frames from capture ring or generate sine tone
         if (use_test_tone_) {
-            std::vector<float> frame_pcm(static_cast<size_t>(kFloatsPerFrame));
-            generate_test_sine(frame_pcm);
-            (void)host_session_.broadcast_audio_frame(frame_pcm);
-            if (delayed_host_enabled_) {
-                auto now_us = static_cast<uint64_t>(
-                    std::chrono::duration_cast<std::chrono::microseconds>(
-                        std::chrono::steady_clock::now().time_since_epoch()
-                    ).count()
-                );
-                delayed_host_renderer_.submit_frame(frame_pcm, now_us);
+            const auto now = std::chrono::steady_clock::now();
+            if (now - last_test_tone_time_ >= std::chrono::milliseconds(kFrameDurationMs)) {
+                last_test_tone_time_ = now;
+                std::vector<float> frame_pcm(static_cast<size_t>(kFloatsPerFrame));
+                generate_test_sine(frame_pcm);
+                (void)host_session_.broadcast_audio_frame(frame_pcm);
+                if (delayed_host_enabled_) {
+                    auto now_us = static_cast<uint64_t>(
+                        std::chrono::duration_cast<std::chrono::microseconds>(
+                            now.time_since_epoch()
+                        ).count()
+                    );
+                    delayed_host_renderer_.submit_frame(frame_pcm, now_us);
+                }
             }
         } else {
             std::vector<float> frame_pcm(static_cast<size_t>(kFloatsPerFrame));
@@ -172,6 +185,9 @@ void AppController::update() {
     } else if (role_ == AppRole::Client) {
         client_session_.update();
         auto stats = client_session_.stats();
+        if (stats.sync_error_us != 0) {
+            latency_tuner_.record_rtt_sample(std::abs(stats.sync_error_us) * 2);
+        }
         latency_tuner_.record_loss_sample(stats.loss_pct);
     }
 }

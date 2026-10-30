@@ -5,6 +5,7 @@
 #include <atomic>
 #include <cstddef>
 #include <cstdint>
+#include <memory>
 #include <span>
 #include <vector>
 
@@ -61,11 +62,11 @@ public:
 private:
     const size_t capacity_samples_;
     std::vector<float> sample_buffer_;
-    std::vector<uint8_t> valid_mask_;  // 1 if sample is populated, 0 if gap/empty
+    std::unique_ptr<std::atomic<uint8_t>[]> valid_mask_;  // 1 if sample is populated, 0 if gap/empty
 
     std::atomic<bool> is_anchored_{false};
-    uint64_t anchor_local_us_{0};
-    uint64_t playhead_sample_index_{0};
+    std::atomic<uint64_t> anchor_local_us_{0};
+    std::atomic<uint64_t> playhead_sample_index_{0};
 
     std::atomic<uint64_t> late_frames_{0};
     std::atomic<uint64_t> gaps_{0};

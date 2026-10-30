@@ -3,6 +3,7 @@
 #include <chorus/codec/opus_codec.hpp>
 #include <chorus/core.hpp>
 #include <chorus/net/control_message.hpp>
+#include <chorus/net/crypto_channel.hpp>
 #include <chorus/net/tcp_socket.hpp>
 #include <chorus/net/udp_socket.hpp>
 #include <chorus/playback/timeline_buffer.hpp>
@@ -77,6 +78,12 @@ public:
     /// @brief Returns current delay offset in milliseconds.
     [[nodiscard]] int32_t offset_ms() const noexcept;
 
+    /// @brief Sets symmetric key for AEAD encrypted UDP transport.
+    void set_encryption_key(std::span<const uint8_t, kCryptoKeySize> key);
+
+    /// @brief Clears encryption key and disables encrypted transport.
+    void clear_encryption();
+
     /// @brief Returns latest client stats snapshot.
     [[nodiscard]] ClientStatsMessage stats() const;
 
@@ -114,6 +121,9 @@ private:
     uint32_t next_ping_id_{1};
     uint64_t audio_packets_received_{0};
     bool playback_device_started_{false};
+    CryptoChannel crypto_channel_;
+    uint64_t last_local_play_us_{0};
+    bool has_scheduled_frame_{false};
 
     std::chrono::steady_clock::time_point last_ping_time_;
     std::chrono::steady_clock::time_point last_stats_report_time_;

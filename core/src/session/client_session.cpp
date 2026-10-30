@@ -99,6 +99,8 @@ void ClientSession::disconnect() {
         udp_socket_.close();
         playback_device_.stop();
         playback_device_started_ = false;
+        has_scheduled_frame_ = false;
+        last_local_play_us_ = 0;
         timeline_buffer_.reset();
         jitter_buffer_.reset();
         clock_estimator_.reset();
@@ -215,8 +217,20 @@ void ClientSession::process_incoming_udp() {
             } else if (header_opt->type == PacketType::Audio) {
                 const auto audio_opt = parse_audio_packet(pkt_span);
                 if (audio_opt.has_value()) {
-                    jitter_buffer_.push(*audio_opt);
-                    audio_packets_received_++;
+                    if ((audio_opt->flags & kPacketFlagEncrypted) != 0) {
+                        if (crypto_channel_.is_initialized()) {
+                            auto decrypted = crypto_channel_.decrypt(audio_opt->payload);
+                            if (decrypted.has_value()) {
+                                AudioPacket dec_pkt = *audio_opt;
+                                dec_pkt.payload = std::span<const uint8_t>(decrypted->data(), decrypted->size());
+                                jitter_buffer_.push(dec_pkt);
+                                audio_packets_received_++;
+                            }
+                        }
+                    } else {
+                        jitter_buffer_.push(*audio_opt);
+                        audio_packets_received_++;
+                    }
                 }
             }
         }
@@ -225,7 +239,6 @@ void ClientSession::process_incoming_udp() {
 
 void ClientSession::drain_jitter_and_play() {
     std::vector<float> pcm_decoded(static_cast<size_t>(kFloatsPerFrame));
-    std::vector<float> pcm_resampled(static_cast<size_t>(kFloatsPerFrame * 2));
 
     JitterFrame jframe;
     while (true) {
@@ -237,11 +250,18 @@ void ClientSession::drain_jitter_and_play() {
         if (pop_res == JitterPopResult::LossPlc) {
             const int samples = decoder_.decode_plc(pcm_decoded);
             if (samples == kSamplesPerFramePerChannel) {
-                resampler_.set_ratio(drift_controller_.resampler_ratio());
-                const size_t out_frames = resampler_.process(pcm_decoded, pcm_resampled);
-                if (out_frames > 0) {
-                    const uint64_t current_us = current_steady_us();
-                    (void)timeline_buffer_.insert_frame(current_us, std::span<const float>(pcm_resampled.data(), out_frames * 2));
+                // Apply local user volume and mute to synthesized PLC
+                const float vol = is_muted_.load() ? 0.0F : volume_.load();
+                if (vol != 1.0F) {
+                    for (float& pcm_sample : pcm_decoded) {
+                        pcm_sample *= vol;
+                    }
+                }
+                if (has_scheduled_frame_) {
+                    constexpr uint64_t kFrameDurationUs = static_cast<uint64_t>(kFrameDurationMs) * 1000ULL;
+                    const uint64_t plc_play_us = last_local_play_us_ + kFrameDurationUs;
+                    last_local_play_us_ = plc_play_us;
+                    (void)timeline_buffer_.insert_frame(plc_play_us, pcm_decoded);
                 }
             }
         } else if (pop_res == JitterPopResult::Ready) {
@@ -259,6 +279,9 @@ void ClientSession::drain_jitter_and_play() {
                 const auto local_play_us = static_cast<uint64_t>(
                     static_cast<int64_t>(clock_estimator_.host_to_local_us(jframe.play_at_host_us)) + user_offset_us
                 );
+                last_local_play_us_ = local_play_us;
+                has_scheduled_frame_ = true;
+
                 const uint64_t current_local_us = current_steady_us();
                 const int64_t phase_error_us = static_cast<int64_t>(local_play_us) - static_cast<int64_t>(current_local_us);
 
@@ -268,17 +291,13 @@ void ClientSession::drain_jitter_and_play() {
                     drift_controller_.clear_resync();
                 }
 
+                // Update continuous playback resampler ratio
                 resampler_.set_ratio(drift_controller_.resampler_ratio());
-                const size_t out_frames = resampler_.process(pcm_decoded, pcm_resampled);
 
-                if (out_frames == static_cast<size_t>(kSamplesPerFramePerChannel)) {
-                    (void)timeline_buffer_.insert_frame(local_play_us, std::span<const float>(pcm_resampled.data(), out_frames * 2));
-                } else {
-                    (void)timeline_buffer_.insert_frame(local_play_us, pcm_decoded);
-                }
+                (void)timeline_buffer_.insert_frame(local_play_us, pcm_decoded);
 
                 if (!playback_device_started_ && timeline_buffer_.is_active()) {
-                    if (playback_device_.start_playback(&timeline_buffer_)) {
+                    if (playback_device_.start_playback(&timeline_buffer_, &resampler_)) {
                         playback_device_started_ = true;
                     }
                 }
@@ -336,6 +355,14 @@ ClientStatsMessage ClientSession::stats() const {
             : 0.0,
         .buffer_ms = static_cast<uint32_t>(jitter_buffer_.size() * static_cast<size_t>(kFrameDurationMs))
     };
+}
+
+void ClientSession::set_encryption_key(std::span<const uint8_t, kCryptoKeySize> key) {
+    crypto_channel_.set_key(key);
+}
+
+void ClientSession::clear_encryption() {
+    crypto_channel_.reset();
 }
 
 bool ClientSession::is_active() const noexcept {

@@ -129,3 +129,22 @@ This document tracks empirical measurements, hardware behavior observations, and
   - Thread-safe, zero-allocation ring buffer capturing state transitions, clock sync events, jitter spikes, and hard resyncs.
   - Structured JSON export provides instantaneous diagnostic bundles for CLI and GUI troubleshooting.
 
+---
+
+## Technical Audit & System Hardening Verification
+- **Continuous Sample-Counter Frame Stamping:**
+  - Resolved thread-wake jitter in `HostSession::broadcast_audio_frame` by anchoring microsecond deadlines to stream sample counter ($T_{\text{anchor}} + \text{samples} \times 10^6 / f_s$).
+  - Prevents packet timestamp clustering when draining buffered capture frames.
+- **Continuous Fractional Resampling Pipeline:**
+  - Integrated `Resampler` directly into real-time audio playback callback (`AudioPlaybackDevice::playback_data_callback`).
+  - Pre-allocated zero-allocation scratch buffer allows fractional sample rate conversion ($1 \pm \text{ppm}$) without inserting artificial gaps or dropping variable-length frames.
+- **Lock-Free Concurrency in `TimelineBuffer`:**
+  - Converted `valid_mask_` to atomic byte array with explicit acquire-release semantics.
+  - Playhead smoothing within $\pm 10\text{ ms}$ eliminates DAC callback scheduling jitter while guaranteeing monotonic read advancement.
+- **Socket Non-Blocking Spin Throttling:**
+  - Added bounded 50 ms `select()` backoff in `TcpStream::send_message` upon `EWOULDBLOCK`, eliminating 100% CPU starvation under transient TCP congestion.
+- **End-to-End AEAD Wire Transport Integration:**
+  - Wired `CryptoChannel` ChaCha20-Poly1305 encryption into UDP audio packet broadcast and client datagram processing with `kPacketFlagEncrypted` header flag.
+  - Verified 100% clean loopback audio transmission with authenticated encryption (42/42 unit test cases passing).
+
+

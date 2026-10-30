@@ -26,6 +26,8 @@ struct PacketHeader {
 };
 
 /// @brief Audio packet structure (Type = 1).
+inline constexpr uint8_t kPacketFlagEncrypted = 0x01;
+
 struct AudioPacket {
     PacketHeader header;
     uint32_t seq{0};

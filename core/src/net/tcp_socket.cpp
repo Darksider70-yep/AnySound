@@ -210,11 +210,25 @@ bool TcpStream::send_message(const ControlMessage& message) {
 #ifdef _WIN32
             const int err = WSAGetLastError();
             if (err == WSAEWOULDBLOCK) {
-                continue;
+                fd_set write_fds;
+                FD_ZERO(&write_fds);
+                FD_SET(socket_fd, &write_fds);
+                timeval tv{.tv_sec = 0, .tv_usec = 50000};
+                const int sel = select(0, nullptr, &write_fds, nullptr, &tv);
+                if (sel > 0) {
+                    continue;
+                }
             }
 #else
             if (errno == EAGAIN || errno == EWOULDBLOCK) {
-                continue;
+                fd_set write_fds;
+                FD_ZERO(&write_fds);
+                FD_SET(socket_fd, &write_fds);
+                timeval tv{.tv_sec = 0, .tv_usec = 50000};
+                const int sel = select(socket_fd + 1, nullptr, &write_fds, nullptr, &tv);
+                if (sel > 0) {
+                    continue;
+                }
             }
 #endif
             close();

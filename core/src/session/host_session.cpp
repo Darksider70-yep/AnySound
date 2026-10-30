@@ -244,8 +244,32 @@ size_t HostSession::broadcast_audio_frame(std::span<const float> frame_pcm) {
         return 0;
     }
 
-    const uint64_t frame_capture_us = current_steady_us();
+    const uint64_t now_us = current_steady_us();
+    const uint64_t stream_elapsed_us = (total_samples_streamed_ * 1000000ULL) / static_cast<uint64_t>(kSampleRate);
+    uint64_t frame_capture_us = stream_anchor_host_us_ + stream_elapsed_us;
+
+    // Resynchronize anchor if stream underrun or divergence exceeds 500 ms
+    if (now_us > frame_capture_us + 500000ULL || frame_capture_us > now_us + 500000ULL) {
+        stream_anchor_host_us_ = now_us;
+        total_samples_streamed_ = 0;
+        frame_capture_us = now_us;
+    }
+
     const uint64_t play_at_host_us = frame_capture_us + (target_latency_ms_ * 1000ULL);
+
+    uint8_t flags = 0;
+    std::vector<uint8_t> encrypted_payload;
+    std::span<const uint8_t> final_payload;
+
+    if (crypto_channel_.is_initialized()) {
+        flags |= kPacketFlagEncrypted;
+        encrypted_payload = crypto_channel_.encrypt(
+            std::span<const uint8_t>(opus_payload.data(), static_cast<size_t>(encoded_bytes))
+        );
+        final_payload = std::span<const uint8_t>(encrypted_payload.data(), encrypted_payload.size());
+    } else {
+        final_payload = std::span<const uint8_t>(opus_payload.data(), static_cast<size_t>(encoded_bytes));
+    }
 
     const AudioPacket pkt{
         .header = {
@@ -256,8 +280,8 @@ size_t HostSession::broadcast_audio_frame(std::span<const float> frame_pcm) {
         },
         .seq = seq_++,
         .play_at_host_us = play_at_host_us,
-        .flags = 0,
-        .payload = std::span<const uint8_t>(opus_payload.data(), static_cast<size_t>(encoded_bytes))
+        .flags = flags,
+        .payload = final_payload
     };
 
     std::vector<uint8_t> pkt_buf(kMaxUdpPayloadSize);
@@ -280,7 +304,7 @@ size_t HostSession::broadcast_audio_frame(std::span<const float> frame_pcm) {
         }
     }
 
-    total_samples_streamed_ += static_cast<uint64_t>(kSamplesPerFramePerChannel);
+    total_samples_streamed_ += frame_pcm.size() / static_cast<size_t>(kChannels);
     return sent_count;
 }
 
@@ -345,6 +369,14 @@ size_t HostSession::authenticated_client_count() const {
     return static_cast<size_t>(std::count_if(clients_.begin(), clients_.end(), [](const ConnectedClient& client_item) {
         return client_item.info.authenticated;
     }));
+}
+
+void HostSession::set_encryption_key(std::span<const uint8_t, kCryptoKeySize> key) {
+    crypto_channel_.set_key(key);
+}
+
+void HostSession::clear_encryption() {
+    crypto_channel_.reset();
 }
 
 bool HostSession::is_running() const noexcept {
